@@ -10,8 +10,8 @@ def main():
     # main.py
     from domain.database import Database
 
-    db = Database('data/tienda.db')
-    db.agregar_producto('Laptop', 999.99, 10)
+    db = Database('data/secure.db')
+    db.addItem(hash=timeHash, key=crbro.generateKey(), extension=".mp4")
 
 if __name__== "__main__":
     main()

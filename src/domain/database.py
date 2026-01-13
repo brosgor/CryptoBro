@@ -12,21 +12,21 @@ class Database:
     
     def init_db(self):
         """Inicializar base de datos con tablas"""
-        with self.get_connection() as conn:
+        with self.getConnection() as conn:
             cursor = conn.cursor()
             # Crear tablas
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS productos (
+                CREATE TABLE IF NOT EXISTS data (
                     id INTEGER PRIMARY KEY,
-                    nombre TEXT NOT NULL,
-                    precio REAL,
-                    stock INTEGER DEFAULT 0
+                    hash TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    extension TEXT NOT NULL
                 )
             ''')
             conn.commit()
     
     @contextmanager
-    def get_connection(self):
+    def getConnection(self):
         """Manejador de contexto para conexiones"""
         conn = sqlite3.connect(self.db_name)
         try:
@@ -35,12 +35,12 @@ class Database:
             conn.close()
     
     # Métodos específicos de la aplicación
-    def agregar_producto(self, nombre, precio, stock=0):
-        with self.get_connection() as conn:
+    def addItem(self, hash, key, extension):
+        with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO productos (nombre, precio, stock) VALUES (?, ?, ?)",
-                (nombre, precio, stock)
+                "INSERT INTO data (hash, key, extension) VALUES (?, ?, ?)",
+                (hash, key, extension)
             )
             conn.commit()
             return cursor.lastrowid
