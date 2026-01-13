@@ -1,7 +1,7 @@
 
 import hashlib
 import datetime
-
+from cryptography.fernet import Fernet 
 class CryptoBro:
     def __init__(self):
         pass
@@ -18,3 +18,15 @@ class CryptoBro:
     def generateHashByCurrentTime(self,time:str = None)-> str:
         current_time = time if time is not None else self.timeNow()
         return self.generateHash(message = current_time)
+    def generateKey(self)-> str:
+        return Fernet.generate_key().decode()
+    def encryptMessage(self, message:str, key:str)-> str:
+        fernet =Fernet(key.encode())
+        encrypted_message = fernet.encrypt(message.encode())
+        return encrypted_message.decode()
+    def decryptMessage(self, encrypted_message:str, key:str)-> str:
+        fernet =Fernet(key.encode())
+        decrypted_message = fernet.decrypt(encrypted_message.encode())
+        return decrypted_message.decode()
+    
+    
