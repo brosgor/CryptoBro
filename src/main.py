@@ -1,4 +1,4 @@
-from domain.CryptoBro import CryptoBro
+from domain.cryptoBro import CryptoBro
 def main():
     crbro = CryptoBro()
     timeNow = crbro.timeNow()
@@ -8,7 +8,7 @@ def main():
     result = crbro.verifyHash(timeNow, timeHash)
     print("Verification: ", result)
     # main.py
-    from domain.database import Database
+    from repository.database import Database
 
     db = Database('data/secure.db')
     db.addItem(hash=timeHash, key=crbro.generateKey(), extension=".mp2")
