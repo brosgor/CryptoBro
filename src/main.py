@@ -11,7 +11,9 @@ def main():
     from domain.database import Database
 
     db = Database('data/secure.db')
-    db.addItem(hash=timeHash, key=crbro.generateKey(), extension=".mp4")
+    db.addItem(hash=timeHash, key=crbro.generateKey(), extension=".mp2")
 
+    item = db.getItemByHash(timeHash)
+    print("Retrieved Item: ", item)
 if __name__== "__main__":
     main()

@@ -45,3 +45,29 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
+    def getItemByHash(self, hash):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM data WHERE hash = ?",
+                (hash,)
+            )
+            return cursor.fetchone()
+    def deleteItemById(self, item_id):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM data WHERE id = ?",
+                (item_id,)
+            )
+            conn.commit()
+            return cursor.rowcount
+    def updateItemKey(self, item_id, new_key):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE data SET key = ? WHERE id = ?",
+                (new_key, item_id)
+            )
+            conn.commit()
+            return cursor.rowcount
