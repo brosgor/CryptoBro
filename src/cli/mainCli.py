@@ -4,11 +4,11 @@ def encryptFile():
     file_path = input("Enter the file path to encrypt: ")
     key = input("Enter the encryption key: ")
     pharase = input("Enter a passphrase (optional): ")
-    extension = crbro.encryptFile(file_path=file_path, key=key)
+    extension, derived_key = crbro.encryptFile(file_path=file_path, key=key)
     print(f"File encrypted successfully with extension: {extension}")
     if input("Do you want to store the key? (y/n): ").lower() == 'y':
         hash = crbro.generate_hash(message=pharase)
-        crbro.generate_and_store_key(hash=hash, key=key, extension=extension)
+        crbro.generate_and_store_key(hash=hash, key=derived_key, extension=extension, generated=True)
         print(f"Key stored with hash: {hash}")
     else:
         print("Key not stored.")
