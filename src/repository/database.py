@@ -55,7 +55,7 @@ class Database:
             )
             row = cursor.fetchone()
             if row:
-                return SecureData(id=row[0], hash=row[1], key=row[2], extension=row[3])
+                return SecureData.from_db(row)
             return None
 
     def deleteItemById(self, item_id):
@@ -81,6 +81,6 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM data")
             rows = cursor.fetchall()
-            return [SecureData(id=row[0], hash=row[1], key=row[2], extension=row[3]) for row in rows]
+            return [SecureData.from_db(row) for row in rows]
 
         
