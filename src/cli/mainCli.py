@@ -29,14 +29,19 @@ def decryptFile():
         elif askForDb == 'n':
             key = input("Enter the decryption key: ")
             extension = None
-        crbro.decryptFile(file_path=file_path, key=key, extension=extension)
+        crbro.decryptFile(file_path=file_path, key=key, extension=extension,generated=True if askForDb == 'y' else False)
         print("File decrypted successfully.")
+def getAllItems():
+    items = crbro.getAllItems()
+    for item in items:
+        print(item)
 
 def mainCli():
     options = {
         '1': ('Encrypt a file', encryptFile),
         '2': ('Decrypt a file', decryptFile),
-        '3': ('Exit', exit)
+        '3': ('View all stored keys', getAllItems),
+        '4': ('Exit', exit)
     }
     while True:
         print("\nSelect an option:")

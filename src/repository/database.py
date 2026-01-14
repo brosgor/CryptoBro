@@ -71,3 +71,9 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount
+    def getAllItems(self):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM data")
+            return cursor.fetchall()
+        

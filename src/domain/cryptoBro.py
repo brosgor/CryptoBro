@@ -82,8 +82,11 @@ class CryptoBro:
         with open(decrypted_path, 'wb') as decrypted_file:
             decrypted_file.write(decrypted)
         
-    def generate_and_store_key(self, hash:str,key:str, extension:str)-> str:
+    def generate_and_store_key(self, hash:str,key:str, extension:str,generated:bool=False)-> str:
+        if not generated:
+            key = self._deriveKey(key)
         self.db.addItem(hash=hash, key=key, extension=extension)
+
         return key
     def getItemByHash(self, hash:str)-> tuple:
         return self.db.getItemByHash(hash)         
