@@ -21,8 +21,8 @@ def decryptFile():
         if askForDb == 'y':
             item = crbro.getItemByHash(hash=hash)
             if item:
-                extension = item[3]
-                key = item[2]
+                extension = item.extension
+                key = item.key
             else:
                 print("No item found with the provided hash.")
                 return

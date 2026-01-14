@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from repository.database import Database
+from models.secure_data import SecureData
 import os
 class CryptoBro:
     def __init__(self):
@@ -88,7 +89,7 @@ class CryptoBro:
         self.db.addItem(hash=hash, key=key, extension=extension)
 
         return key
-    def getItemByHash(self, hash:str)-> tuple:
+    def getItemByHash(self, hash:str)-> SecureData:
         return self.db.getItemByHash(hash)         
 
     def delete_key_by_id(self, item_id:int)-> None: 

@@ -1,4 +1,5 @@
 from domain.cryptoBro import CryptoBro
+from models.secure_data import SecureData
 class CryptoService:
     def __init__(self):
         self.crypto_bro = CryptoBro()
@@ -18,7 +19,7 @@ class CryptoService:
         self.crypto_bro.decryptFile(file_path, key,extension=extension, generated=generated)
     def generate_and_store_key(self, hash: str,key:str, extension: str) -> str:
         return self.crypto_bro.generate_and_store_key(hash,key, extension)
-    def getItemByHash(self, hash: str) -> tuple:
+    def getItemByHash(self, hash: str) -> SecureData:
         return self.crypto_bro.getItemByHash(hash)         
     def delete_key_by_id(self, item_id: int) -> None: 
         self.crypto_bro.delete_key_by_id(item_id)     

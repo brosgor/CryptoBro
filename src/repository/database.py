@@ -4,6 +4,7 @@
 # database.py
 import sqlite3
 from contextlib import contextmanager
+from models.secure_data import SecureData
 
 class Database:
     def __init__(self, db_name='app.db'):
@@ -52,7 +53,11 @@ class Database:
                 "SELECT * FROM data WHERE hash = ?",
                 (hash,)
             )
-            return cursor.fetchone()
+            row = cursor.fetchone()
+            if row:
+                return SecureData(id=row[0], hash=row[1], key=row[2], extension=row[3])
+            return None
+
     def deleteItemById(self, item_id):
         with self.getConnection() as conn:
             cursor = conn.cursor()
@@ -75,5 +80,7 @@ class Database:
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM data")
-            return cursor.fetchall()
+            rows = cursor.fetchall()
+            return [SecureData(id=row[0], hash=row[1], key=row[2], extension=row[3]) for row in rows]
+
         
