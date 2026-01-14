@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from service.cryptoService import CryptoService
+import uuid
+import os
 
 class CryptoApp:
     def __init__(self, root):
@@ -45,17 +47,30 @@ class CryptoApp:
         self.enc_key = tk.StringVar()
         ttk.Entry(frame, textvariable=self.enc_key, show="*", width=40).grid(row=1, column=1, pady=5)
         
-        # Passphrase (for checking hash later)
-        ttk.Label(frame, text="Passphrase (for storage):").grid(row=2, column=0, sticky="w", pady=5)
-        self.enc_passphrase = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.enc_passphrase, width=40).grid(row=2, column=1, pady=5)
-        
-        # Store Checkbox
-        self.store_key_var = tk.BooleanVar()
-        ttk.Checkbutton(frame, text="Store key in database?", variable=self.store_key_var).grid(row=3, column=1, sticky="w", pady=5)
+        # Store Checkbox (Moved up)
+        self.store_key_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Store key in database?", variable=self.store_key_var, command=self.toggle_encrypt_pass_info).grid(row=2, column=1, sticky="w", pady=(10, 5))
+
+        # Passphrase Info labels (Hidden/Shown dynamically)
+        self.lbl_pass_title = ttk.Label(frame, text="Passphrase Generation:")
+        self.lbl_pass_info = ttk.Label(frame, text="A unique memorable passphrase will be generated automatically.")
         
         # Action Button
-        ttk.Button(frame, text="Encrypt", command=self.perform_encryption).grid(row=4, column=1, pady=20)
+        self.btn_action = ttk.Button(frame, text="Encrypt", command=self.perform_encryption)
+        self.btn_action.grid(row=4, column=1, pady=20)
+        
+        # Initialize state
+        self.toggle_encrypt_pass_info()
+
+    def toggle_encrypt_pass_info(self):
+        if self.store_key_var.get():
+            self.lbl_pass_title.grid(row=3, column=0, sticky="w", pady=5)
+            self.lbl_pass_info.grid(row=3, column=1, pady=5, sticky="w")
+            self.btn_action.config(text="Encrypt & Generate")
+        else:
+            self.lbl_pass_title.grid_remove()
+            self.lbl_pass_info.grid_remove()
+            self.btn_action.config(text="Encrypt Only")
 
     def browse_encrypt_file(self):
         filename = filedialog.askopenfilename()
@@ -65,7 +80,6 @@ class CryptoApp:
     def perform_encryption(self):
         file_path = self.enc_file_path.get()
         key = self.enc_key.get()
-        passphrase = self.enc_passphrase.get()
         store = self.store_key_var.get()
         
         if not file_path or not key:
@@ -77,12 +91,27 @@ class CryptoApp:
             msg = f"File encrypted successfully! Extension: {extension}"
             
             if store:
-                if not passphrase:
-                    messagebox.showwarning("Warning", "Passphrase required to store key.")
-                else:
+                # Generate unique mnemonic passphrase
+                while True:
+                    passphrase = self.service.generate_mnemonic_passphrase(3)
                     hash_val = self.service.generate_hash(passphrase)
-                    self.service.generate_and_store_key(hash=hash_val, key=derived_key, extension=extension, generated=True)
-                    msg += f"\nKey stored with hash: {hash_val}"
+                    if not self.service.getItemByHash(hash_val):
+                        break
+                
+                # Store in DB
+                self.service.generate_and_store_key(hash=hash_val, key=derived_key, extension=extension, generated=True)
+                
+                msg += f"\n\nKey stored securely.\nYOUR PASSPHRASE IS: {passphrase}"
+                
+                # Ask if user wants to save .par file
+                if messagebox.askyesno("Save Passphrase", f"Your recovery passphrase is:\n\n{passphrase}\n\nDo you want to save this to a '.par' file?"):
+                    base_path = os.path.splitext(file_path)[0]
+                    par_path = base_path + ".par"
+                    with open(par_path, 'w') as f:
+                        f.write(passphrase)
+                    msg += f"\nPassphrase saved to: {par_path}"
+                else:
+                    msg += "\n(Please write down your passphrase!)"
             
             messagebox.showinfo("Success", msg)
             self.refresh_keys_list()
@@ -104,20 +133,33 @@ class CryptoApp:
         ttk.Radiobutton(frame, text="Manual Key", variable=self.dec_mode, value="manual", command=self.toggle_dec_inputs).grid(row=1, column=0, sticky="w", pady=5)
         ttk.Radiobutton(frame, text="From Database", variable=self.dec_mode, value="db", command=self.toggle_dec_inputs).grid(row=1, column=1, sticky="w", pady=5)
         
-        # Manual Input
+        # Manual Input Widgets
         self.lbl_dec_key = ttk.Label(frame, text="Decryption Key:")
-        self.lbl_dec_key.grid(row=2, column=0, sticky="w", pady=5)
         self.entry_dec_key = ttk.Entry(frame, show="*", width=40)
-        self.entry_dec_key.grid(row=2, column=1, pady=5)
         
-        # DB Input
-        self.lbl_dec_pass = ttk.Label(frame, text="Passphrase:")
-        self.entry_dec_pass = ttk.Entry(frame, width=40)
-        # Initially hidden/shown based on default
+        # DB Input Widgets
+        self.lbl_dec_pass = ttk.Label(frame, text="Passphrase or .par File:")
+        self.pass_frame = ttk.Frame(frame)
+        self.entry_dec_pass = ttk.Entry(self.pass_frame, width=30)
+        self.entry_dec_pass.pack(side="left", padx=(0, 5))
+        ttk.Button(self.pass_frame, text="Load .par", command=self.load_par_file).pack(side="left")
+        
+        # Initially apply visibility state
         self.toggle_dec_inputs()
         
         # Action Button
         ttk.Button(frame, text="Decrypt", command=self.perform_decryption).grid(row=4, column=1, pady=20)
+
+    def load_par_file(self):
+        filename = filedialog.askopenfilename(filetypes=[("Par Files", "*.par"), ("Text Files", "*.txt")])
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    content = f.read().strip()
+                self.entry_dec_pass.delete(0, tk.END)
+                self.entry_dec_pass.insert(0, content)
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not read file: {e}")
 
     def browse_decrypt_file(self):
         filename = filedialog.askopenfilename(filetypes=[("Bros Files", "*.bros"), ("All Files", "*.*")])
@@ -126,15 +168,26 @@ class CryptoApp:
 
     def toggle_dec_inputs(self):
         if self.dec_mode.get() == "manual":
-            self.lbl_dec_pass.grid_remove()
-            self.entry_dec_pass.grid_remove()
-            self.lbl_dec_key.grid(row=2, column=0, sticky="w", pady=5)
-            self.entry_dec_key.grid(row=2, column=1, pady=5)
+            # Hide DB widgets
+            if hasattr(self, 'lbl_dec_pass'):
+                self.lbl_dec_pass.grid_remove()
+                self.pass_frame.grid_remove()
+            
+            # Show Manual widgets
+            if hasattr(self, 'lbl_dec_key'):
+                self.lbl_dec_key.grid(row=2, column=0, sticky="w", pady=5)
+                self.entry_dec_key.grid(row=2, column=1, pady=5)
         else:
-            self.lbl_dec_key.grid_remove()
-            self.entry_dec_key.grid_remove()
-            self.lbl_dec_pass.grid(row=2, column=0, sticky="w", pady=5)
-            self.entry_dec_pass.grid(row=2, column=1, pady=5)
+            # Hide Manual widgets
+            if hasattr(self, 'lbl_dec_key'):
+                self.lbl_dec_key.grid_remove()
+                self.entry_dec_key.grid_remove()
+            
+            # Show DB widgets
+            if hasattr(self, 'lbl_dec_pass'):
+                self.lbl_dec_pass.grid(row=2, column=0, sticky="w", pady=5)
+                self.pass_frame.grid(row=2, column=1, pady=5, sticky="w")
+
 
     def perform_decryption(self):
         file_path = self.dec_file_path.get()
@@ -194,8 +247,29 @@ class CryptoApp:
         
         self.tree.pack(fill="both", expand=True)
         
-        ttk.Button(frame, text="Refresh", command=self.refresh_keys_list).pack(pady=10)
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="Refresh", command=self.refresh_keys_list).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Delete Selected", command=self.delete_selected_key).pack(side="left", padx=5)
+        
         self.refresh_keys_list()
+    
+    def delete_selected_key(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Warning", "Please select a key to delete.")
+            return
+            
+        if messagebox.askyesno("Confirm", "Are you sure you want to delete this key? This action cannot be undone."):
+            try:
+                item_values = self.tree.item(selected_item, 'values')
+                item_id = item_values[0] # ID is first column
+                self.service.delete_key_by_id(item_id)
+                self.refresh_keys_list()
+                messagebox.showinfo("Success", "Key deleted successfully.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not delete: {e}")
 
     def refresh_keys_list(self):
         for i in self.tree.get_children():

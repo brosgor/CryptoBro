@@ -1,8 +1,25 @@
 from domain.cryptoBro import CryptoBro
 from models.secure_data import SecureData
+import json
+import random
+import os
+
 class CryptoService:
     def __init__(self):
         self.crypto_bro = CryptoBro()
+    
+    def generate_mnemonic_passphrase(self, num_words: int = 3) -> str:
+        """Generates a random passphrase from words.json"""
+        json_path = os.path.join('data', 'words.json')
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                words = json.load(f)
+            return "-".join(random.sample(words, num_words))
+        except Exception as e:
+            # Fallback if file not found
+            print(f"Error loading words: {e}")
+            return f"word{random.randint(100,999)}-secure-{random.randint(100,999)}"
+
     def generate_hash(self, message: str) -> str:
         return self.crypto_bro.generateHash(message)
     def verify_hash(self, message: str, hash: str) -> bool:
