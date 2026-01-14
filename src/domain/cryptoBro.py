@@ -66,7 +66,7 @@ class CryptoBro:
         with open(encrypted_path, 'wb') as encrypted_file:
             encrypted_file.write(encrypted)
         return extension_encrypted
-    def decryptFile(self, file_path:str, key:str,extension:str,generated:bool=False)-> None:
+    def decryptFile(self, file_path:str, key:str,extension:str=None,generated:bool=False)-> None:
         if not generated:
             key = self._deriveKey(key)
         fernet =Fernet(key.encode())
@@ -74,7 +74,10 @@ class CryptoBro:
             encrypted = encrypted_file.read()
         decrypted = fernet.decrypt(encrypted)
         base, ext = os.path.splitext(file_path)
-        extension_decrypted = self.decryptMessage(encrypted_message=extension,key=key)
+        if extension is not None:
+            extension_decrypted = self.decryptMessage(encrypted_message=extension,key=key)
+        else:
+            extension_decrypted = '.decrypted'
         decrypted_path = base + extension_decrypted
         with open(decrypted_path, 'wb') as decrypted_file:
             decrypted_file.write(decrypted)
