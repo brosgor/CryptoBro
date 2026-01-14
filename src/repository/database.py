@@ -7,12 +7,14 @@ from contextlib import contextmanager
 from models.secure_data import SecureData
 
 class Database:
+    """Clase para manejar las operaciones SQLite de almacenamiento de claves."""
     def __init__(self, db_name='app.db'):
+        """Inicializa la base de datos."""
         self.db_name = db_name
         self.init_db()
     
     def init_db(self):
-        """Inicializar base de datos con tablas"""
+        """Inicializar base de datos con tablas si no existen."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             # Crear tablas
@@ -28,7 +30,7 @@ class Database:
     
     @contextmanager
     def getConnection(self):
-        """Manejador de contexto para conexiones"""
+        """Manejador de contexto para asegurar el cierre de conexiones SQLite."""
         conn = sqlite3.connect(self.db_name)
         try:
             yield conn
@@ -37,6 +39,7 @@ class Database:
     
     # Métodos específicos de la aplicación
     def addItem(self, hash, key, extension):
+        """Inserta un nuevo registro seguro en la base de datos."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -47,6 +50,7 @@ class Database:
             return cursor.lastrowid
 
     def getItemByHash(self, hash):
+        """Busca y retorna un registro por su hash."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -59,6 +63,7 @@ class Database:
             return None
 
     def deleteItemById(self, item_id):
+        """Elimina un registro de la base de datos."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -67,7 +72,9 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount
+
     def updateItemKey(self, item_id, new_key):
+        """Actualiza la clave de un registro existente."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -76,7 +83,9 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount
+
     def getAllItems(self):
+        """Obtiene una lista de todos los registros en la base de datos."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM data")

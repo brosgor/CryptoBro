@@ -5,7 +5,9 @@ import uuid
 import os
 
 class CryptoApp:
+    """Clase principal de la interfaz gráfica GUI basada en Tkinter."""
     def __init__(self, root):
+        """Inicializa la ventana principal, dimensiones y servicio."""
         self.root = root
         self.root.title("CryptoBro GUI")
         self.root.geometry("600x450")
@@ -15,6 +17,7 @@ class CryptoApp:
         self.create_widgets()
         
     def create_widgets(self):
+        """Crea y organiza las pestañas principales de la aplicación."""
         # Tab Control
         tabControl = ttk.Notebook(self.root)
         
@@ -33,6 +36,7 @@ class CryptoApp:
         self.setup_keys_tab()
 
     def setup_encrypt_tab(self):
+        """Configura los widgets de la pestaña de encriptación."""
         frame = ttk.Frame(self.tab_encrypt, padding="20")
         frame.pack(fill="both", expand=True)
 
@@ -66,6 +70,7 @@ class CryptoApp:
         self.toggle_encrypt_pass_info()
 
     def toggle_encrypt_pass_info(self):
+        """Muestra u oculta información sobre passphrases según el estado del checkbox."""
         if self.store_key_var.get():
             self.lbl_pass_title.grid(row=3, column=0, sticky="w", pady=5)
             self.lbl_pass_info.grid(row=3, column=1, pady=5, sticky="w")
@@ -76,11 +81,16 @@ class CryptoApp:
             self.btn_action.config(text="Encrypt Only")
 
     def browse_encrypt_file(self):
+        """Abre el diálogo del sistema para seleccionar un archivo."""
         filename = filedialog.askopenfilename()
         if filename:
             self.enc_file_path.set(filename)
 
     def perform_encryption(self):
+        """
+        Ejecuta la lógica de encriptación cuando se presiona el botón.
+        Maneja validaciones, llamadas al servicio y generación de archivos .par.
+        """
         file_path = self.enc_file_path.get()
         key = self.enc_key.get()
         store = self.store_key_var.get()
@@ -122,6 +132,7 @@ class CryptoApp:
             messagebox.showerror("Error", str(e))
 
     def setup_decrypt_tab(self):
+        """Configura los widgets de la pestaña de desencriptación."""
         frame = ttk.Frame(self.tab_decrypt, padding="20")
         frame.pack(fill="both", expand=True)
         
@@ -159,6 +170,7 @@ class CryptoApp:
         ttk.Button(frame, text="Decrypt", command=self.perform_decryption).grid(row=4, column=1, pady=20)
 
     def load_par_file(self):
+        """Carga el contenido de un archivo .par en el campo de passphrase."""
         filename = filedialog.askopenfilename(filetypes=[("Par Files", "*.par"), ("Text Files", "*.txt")])
         if filename:
             try:
@@ -170,11 +182,13 @@ class CryptoApp:
                 messagebox.showerror("Error", f"Could not read file: {e}")
 
     def browse_decrypt_file(self):
+        """Selector de archivos para desencriptar (filtra por .bros)."""
         filename = filedialog.askopenfilename(filetypes=[("Bros Files", "*.bros"), ("All Files", "*.*")])
         if filename:
             self.dec_file_path.set(filename)
 
     def toggle_dec_inputs(self):
+        """Alterna entre inputs manuales y de base de datos."""
         if self.dec_mode.get() == "manual":
             # Hide DB widgets
             if hasattr(self, 'lbl_dec_pass'):
@@ -198,6 +212,10 @@ class CryptoApp:
 
 
     def perform_decryption(self):
+        """
+        Ejecuta la lógica de desencriptación.
+        Recupera la clave desde la BD o usa la ingresada manualmente.
+        """
         file_path = self.dec_file_path.get()
         mode = self.dec_mode.get()
         
@@ -240,6 +258,7 @@ class CryptoApp:
             messagebox.showerror("Error", f"Decryption failed: {str(e)}")
 
     def setup_keys_tab(self):
+        """Configura la tabla de claves almacenadas."""
         frame = ttk.Frame(self.tab_keys, padding="20")
         frame.pack(fill="both", expand=True)
         
@@ -264,6 +283,7 @@ class CryptoApp:
         self.refresh_keys_list()
     
     def delete_selected_key(self):
+        """Elimina la clave seleccionada de la base de datos tras confirmación."""
         selected_item = self.tree.selection()
         if not selected_item:
             messagebox.showwarning("Warning", "Please select a key to delete.")
@@ -280,6 +300,7 @@ class CryptoApp:
                 messagebox.showerror("Error", f"Could not delete: {e}")
 
     def refresh_keys_list(self):
+        """Recarga los datos de la tabla de claves desde la base de datos."""
         for i in self.tree.get_children():
             self.tree.delete(i)
         
