@@ -35,17 +35,20 @@ class CryptoApp:
     def setup_encrypt_tab(self):
         frame = ttk.Frame(self.tab_encrypt, padding="20")
         frame.pack(fill="both", expand=True)
+
+        # Configure grid responsiveness
+        frame.columnconfigure(1, weight=1)
         
         # File Selection
         self.enc_file_path = tk.StringVar()
         ttk.Label(frame, text="File to Encrypt:").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(frame, textvariable=self.enc_file_path, width=40).grid(row=0, column=1, pady=5)
+        ttk.Entry(frame, textvariable=self.enc_file_path).grid(row=0, column=1, sticky="ew", pady=5)
         ttk.Button(frame, text="Browse", command=self.browse_encrypt_file).grid(row=0, column=2, padx=5, pady=5)
         
         # Key
         ttk.Label(frame, text="Encryption Key:").grid(row=1, column=0, sticky="w", pady=5)
         self.enc_key = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.enc_key, show="*", width=40).grid(row=1, column=1, pady=5)
+        ttk.Entry(frame, textvariable=self.enc_key, show="*").grid(row=1, column=1, sticky="ew", pady=5)
         
         # Store Checkbox (Moved up)
         self.store_key_var = tk.BooleanVar(value=True)
@@ -122,10 +125,13 @@ class CryptoApp:
         frame = ttk.Frame(self.tab_decrypt, padding="20")
         frame.pack(fill="both", expand=True)
         
+        # Configure grid responsiveness
+        frame.columnconfigure(1, weight=1)
+
         # File Selection
         self.dec_file_path = tk.StringVar()
         ttk.Label(frame, text="File to Decrypt (.bros):").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(frame, textvariable=self.dec_file_path, width=40).grid(row=0, column=1, pady=5)
+        ttk.Entry(frame, textvariable=self.dec_file_path).grid(row=0, column=1, sticky="ew", pady=5)
         ttk.Button(frame, text="Browse", command=self.browse_decrypt_file).grid(row=0, column=2, padx=5, pady=5)
         
         # Mode Selection
@@ -135,13 +141,15 @@ class CryptoApp:
         
         # Manual Input Widgets
         self.lbl_dec_key = ttk.Label(frame, text="Decryption Key:")
-        self.entry_dec_key = ttk.Entry(frame, show="*", width=40)
+        self.entry_dec_key = ttk.Entry(frame, show="*")
         
         # DB Input Widgets
         self.lbl_dec_pass = ttk.Label(frame, text="Passphrase or .par File:")
         self.pass_frame = ttk.Frame(frame)
-        self.entry_dec_pass = ttk.Entry(self.pass_frame, width=30)
-        self.entry_dec_pass.pack(side="left", padx=(0, 5))
+        self.pass_frame.columnconfigure(0, weight=1) # Ensure inner frame expands
+
+        self.entry_dec_pass = ttk.Entry(self.pass_frame)
+        self.entry_dec_pass.pack(side="left", padx=(0, 5), fill="x", expand=True)
         ttk.Button(self.pass_frame, text="Load .par", command=self.load_par_file).pack(side="left")
         
         # Initially apply visibility state
@@ -176,7 +184,7 @@ class CryptoApp:
             # Show Manual widgets
             if hasattr(self, 'lbl_dec_key'):
                 self.lbl_dec_key.grid(row=2, column=0, sticky="w", pady=5)
-                self.entry_dec_key.grid(row=2, column=1, pady=5)
+                self.entry_dec_key.grid(row=2, column=1, sticky="ew", pady=5)
         else:
             # Hide Manual widgets
             if hasattr(self, 'lbl_dec_key'):
@@ -186,7 +194,7 @@ class CryptoApp:
             # Show DB widgets
             if hasattr(self, 'lbl_dec_pass'):
                 self.lbl_dec_pass.grid(row=2, column=0, sticky="w", pady=5)
-                self.pass_frame.grid(row=2, column=1, pady=5, sticky="w")
+                self.pass_frame.grid(row=2, column=1, pady=5, sticky="ew")
 
 
     def perform_decryption(self):
