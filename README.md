@@ -1,92 +1,135 @@
-# CryptoBro
+# CryptoBro Wiki
 
-CryptoBro es una herramienta desarrollada en Python para encriptar y desencriptar archivos de forma segura. Utiliza estándares de criptografía robustos para proteger tu información, permitiéndote además gestionar las claves de encriptación mediante una base de datos local protegida por contraseña.
+Bienvenido a la Wiki oficial de **CryptoBro**. Aquí encontrarás toda la documentación necesaria para instalar, utilizar y entender el funcionamiento de esta herramienta de seguridad.
 
-## Características
+## Índice
 
-*   **Encriptación de Archivos**: Cifra cualquier tipo de archivo utilizando fernet (implementación de AES simétrico).
-*   **Gestión de Claves**:
-    *   Genera claves seguras a partir de una contraseña proporcionada por el usuario (usando PBKDF2HMAC con SHA256).
-    *   Opción para almacenar la clave de desencriptación y la extensión original del archivo en una base de datos local (`secure.db`).
-    *   Recuperación de claves mediante un "passphrase" (frase de contraseña) cuyo hash sirve como índice de búsqueda.
-*   **Ofuscación de Extensión**: Los archivos encriptados pasan a tener la extensión `.bros`, ocultando el tipo de archivo original. La extensión original se cifra y se guarda para restaurar el archivo correctamente.
+1. [Introducción](#introducción)
+2. [Instalación y Configuración](#instalación-y-configuración)
+3. [Guía de Usuario](#guía-de-usuario)
+    - [Inicio de la Aplicación](#inicio-de-la-aplicación)
+    - [Encriptar Archivos](#encriptar-archivos)
+    - [Desencriptar Archivos](#desencriptar-archivos)
+    - [Gestión de Claves](#gestión-de-claves)
+4. [Arquitectura del Proyecto](#arquitectura-del-proyecto)
+5. [Tecnologías](#tecnologías)
 
-## Requisitos
+---
 
-*   Python 3.x
-*   Las dependencias listadas en `requirements.txt`
+## Introducción
 
-## Instalación
+**CryptoBro** es una aplicación de escritorio robusta diseñada para la protección de archivos mediante criptografía AES. Su filosofía es ofrecer seguridad de grado militar con una experiencia de usuario (UX) simplificada.
 
-1.  **Clona el repositorio:**
+### Características Principales
+*   🛡️ **Encriptación Fernet (AES)**: Seguridad simétrica estándar de la industria.
+*   🗝️ **Gestión Híbrida de Claves**: Elige entre recordar tu contraseña o gestionarla automáticamente.
+*   🗣️ **Passphrases Mnemotécnicas**: Sistema inteligente que genera frases como `sol-montaña-azul` en lugar de códigos hexadecimales imposibles de recordar.
+*   📂 **Archivos .par**: Portabilidad para tus credenciales de recuperación.
+*   🖥️ **GUI Responsiva**: Interfaz moderna construida con Tkinter.
 
+---
+
+## Instalación y Configuración
+
+### Prerrequisitos
+*   **Sistema Operativo**: Linux, Windows o MacOS.
+*   **Python**: Versión 3.x instalada.
+
+### Pasos de Instalación
+
+1.  **Clonar el Repositorio**
     ```bash
     git clone http://localhost:3000/brosgor/CryptoBro.git
     cd CryptoBro
     ```
 
-2.  **Crea un entorno virtual (Recomendado):**
-
+2.  **Configurar Entorno Virtual** (Altamente Recomendado)
     ```bash
     python -m venv venv
-    
-    # En Linux/MacOS
+    # Linux/Mac
     source venv/bin/activate
-    
-    # En Windows
+    # Windows
     .\venv\Scripts\activate
     ```
 
-3.  **Instala las dependencias:**
-
+3.  **Instalar Dependencias**
     ```bash
     pip install -r requirements.txt
     ```
 
-## Uso
+---
 
-Para iniciar la aplicación, ejecuta el script principal desde la raíz del proyecto:
+## Guía de Usuario
 
+### Inicio de la Aplicación
+Ejecuta el siguiente comando desde la raíz del proyecto para abrir la interfaz gráfica:
 ```bash
 python src/main.py
 ```
 
-### Menú Principal
+### Encriptar Archivos
+La pestaña **"Encrypt File"** es el punto de partida.
 
-Al ejecutar el programa, verás las siguientes opciones:
+1.  **File to Encrypt**: Selecciona cualquier archivo de tu sistema.
+2.  **Encryption Key**: Define una contraseña maestra para este cifrado.
+3.  **Store key in database?**:
+    *   ✅ **Activado (Recomendado)**:
+        *   El sistema generará una **Passphrase Mnemotécnica** única.
+        *   Se te ofrecerá guardar un archivo `.par` (contiene la frase y se guarda en la misma carpeta del archivo original).
+        *   *Ventaja*: No necesitas recordar la `Encryption Key`, solo necesitas el archivo `.par` o recordar la frase generada.
+    *   ⬜ **Desactivado (Modo Paranoico)**:
+        *   No se guarda nada en la base de datos.
+        *   *Advertencia*: Si olvidas la `Encryption Key`, el archivo será irrecuperable.
+4.  Haz clic en **Encrypt**. El archivo original se transformará cifrado y cambiara a formato `.bros`.
 
-1.  **Encrypt a file (Encriptar un archivo):**
-    *   Te pedirá la ruta del archivo.
-    *   Te pedirá una clave (contraseña) para encriptarlo.
-    *   Te pedirá una frase de contraseña (opcional) para generar un hash identificador.
-    *   Al finalizar, te preguntará si deseas guardar la clave en la base de datos. Si aceptas, podrás recuperar la clave más tarde usando la frase de contraseña.
-    *   El archivo resultante tendrá la extensión `.bros`.
+### Desencriptar Archivos
+Dirígete a la pestaña **"Decrypt File"**.
 
-2.  **Decrypt a file (Desencriptar un archivo):**
-    *   Te pedirá la ruta del archivo `.bros`.
-    *   Te preguntará si deseas recuperar la clave desde la base de datos:
-        *   **Sí (`y`):** Debes ingresar la frase de contraseña que usaste al encriptar. Si es correcta, el sistema recuperará la clave y la extensión original automáticamente.
-        *   **No (`n`):** Deberás ingresar manualmente la clave de desencriptación. *Nota: Si lo haces manualmente y no se conoce la extensión, el archivo se guardará con una extensión por defecto o tendrás que renombrarlo manualmente.*
+1.  **File to Decrypt**: Selecciona el archivo `.bros`.
+2.  **Selecciona el Modo**:
+    *   **Manual Key**: Si encriptaste sin guardar en la BD. Ingresa la contraseña exacta.
+    *   **From Database**: Si usaste el modo gestionado.
+        *   Haz clic en **"Load .par"** y selecciona tu archivo de recuperación.
+        *   O escribe manualmente tu frase (ej. `gato-nube-verde`).
+3.  Haz clic en **Decrypt**. El archivo recuperará su nombre y extensión originales.
 
-3.  **View all stored keys (Ver claves almacenadas):**
-    *   Muestra una lista de los registros guardados en la base de datos local (hashes, claves encriptadas, extensiones).
+### Gestión de Claves
+En la pestaña **"Stored Keys"** puedes auditar tu seguridad.
 
-4.  **Exit:** Salir de la aplicación.
-
-## Estructura del Proyecto
-
-*   `src/main.py`: Punto de entrada de la aplicación.
-*   `src/cli/`: Contiene la lógica de la interfaz de usuario actual.
-*   `src/domain/`: Lógica de negocio y criptografía (CryptoBro).
-*   `src/repository/`: Manejo de la base de datos SQLite.
-*   `src/service/`: Capa de servicio que conecta la interfaz con el dominio.
-*   `data/`: Carpeta donde se almacenan la base de datos (`secure.db`) y archivos de prueba.
-
-## Tecnologías Utilizadas
-
-*   **Python**: Lenguaje principal.
-*   **Cryptography (Fernet)**: Para encriptación simétrica segura.
-*   **SQLite**: Para el almacenamiento local de claves.
+*   **Tabla de Registros**: Muestra el ID, el Hash de la passphrase (por seguridad nunca se muestra la frase real) y la extensión original del archivo.
+*   **Limpieza**: Puedes seleccionar registros antiguos y eliminarlos permanentemente con el botón **"Delete Selected"**.
 
 ---
-*Nota: Este proyecto es para fines educativos y de protección personal de datos.*  
+
+## Arquitectura del Proyecto
+
+Para desarrolladores que deseen contribuir o entender el código.
+
+### Estructura de Directorios
+
+| Ruta | Descripción |
+| :--- | :--- |
+| `src/main.py` | Entry point. Inicializa la `CryptoApp`. |
+| `src/gui/` | **Presentación**. Contiene `app.py` con la lógica de Tkinter, widgets y eventos. |
+| `src/service/` | **Aplicación**. `cryptoService.py` orquesta la comunicación entre la GUI y el Dominio. |
+| `src/domain/` | **Dominio**. `cryptoBro.py` contiene la lógica pura de criptografía (Fernet, PBKDF2). |
+| `src/models/` | **Datos**. `secure_data.py` define la estructura de los objetos (Data Classes). |
+| `src/repository/` | **Persistencia**. `database.py` gestiona las conexiones SQLite. |
+| `data/` | **Recursos**. Contiene `secure.db` (BD), `words.json` (diccionario) y archivos `.par` generados. |
+
+### Flujo de Datos
+`GUI` -> `Service` -> `Domain` (Cifrado) / `Repository` (Persistencia) -> `SQLite`
+
+---
+
+## Tecnologías
+
+Este proyecto está construido sobre hombros de gigantes:
+
+*   **Lenguaje**: [Python 3](https://www.python.org/)
+*   **GUI Framework**: [Tkinter](https://docs.python.org/3/library/tkinter.html) (Nativo)
+*   **Seguridad**: [Cryptography](https://cryptography.io/en/latest/) (Librería estándar de facto)
+*   **Base de Datos**: [SQLite3](https://www.sqlite.org/index.html)
+
+---
+*CryptoBro - Seguridad accesible para todos.*  
