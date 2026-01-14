@@ -77,7 +77,7 @@ class CryptoBro:
         if extension is not None:
             extension_decrypted = self.decryptMessage(encrypted_message=extension,key=key)
         else:
-            extension_decrypted = '.decrypted'
+            extension_decrypted = '.gor'
         decrypted_path = base + extension_decrypted
         with open(decrypted_path, 'wb') as decrypted_file:
             decrypted_file.write(decrypted)
