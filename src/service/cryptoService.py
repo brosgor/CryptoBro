@@ -8,14 +8,14 @@ class CryptoService:
         return self.crypto_bro.verifyHash(message, hash)
     def generate_key(self) -> str:
         return self.crypto_bro.generateKey()
-    def encrypt_message(self, message: str, key: str) -> str:
-        return self.crypto_bro.encryptMessage(message, key)
+    def encrypt_message(self, message: str, key: str,generated:bool=False) -> str:
+        return self.crypto_bro.encryptMessage(message, key, generated=generated)
     def decrypt_message(self, encrypted_message: str, key: str) -> str:
         return self.crypto_bro.decryptMessage(encrypted_message, key)   
-    def encryptFile(self, file_path: str, key: str) -> str:
-        return self.crypto_bro.encryptFile(file_path, key)
-    def decryptFile(self, file_path: str, key: str,extension:str) -> None:
-        self.crypto_bro.decryptFile(file_path, key,extension=extension)
+    def encryptFile(self, file_path: str, key: str,generated:bool=False) -> str:
+        return self.crypto_bro.encryptFile(file_path, key, generated=generated)
+    def decryptFile(self, file_path: str, key: str,extension:str,generated:bool=False) -> None:
+        self.crypto_bro.decryptFile(file_path, key,extension=extension, generated=generated)
     def generate_and_store_key(self, hash: str,key:str, extension: str) -> str:
         return self.crypto_bro.generate_and_store_key(hash,key, extension)
     def getItemByHash(self, hash: str) -> tuple:
