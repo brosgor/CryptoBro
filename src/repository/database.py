@@ -5,6 +5,7 @@
 import sqlite3
 from contextlib import contextmanager
 from models.secure_data import SecureData
+from models.secure_message import SecureMessage
 
 class Database:
     """Clase para manejar las operaciones SQLite de almacenamiento de claves."""
@@ -24,6 +25,14 @@ class Database:
                     hash TEXT NOT NULL,
                     key TEXT NOT NULL,
                     extension TEXT NOT NULL
+                )
+            ''')
+            # Crear tabla de mensajes
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content_encrypted TEXT NOT NULL
                 )
             ''')
             conn.commit()
@@ -91,5 +100,43 @@ class Database:
             cursor.execute("SELECT * FROM data")
             rows = cursor.fetchall()
             return [SecureData.from_db(row) for row in rows]
+
+    # Métodos para mensajes
+    def addMessage(self, title, content_encrypted):
+        """Inserta un nuevo mensaje cifrado."""
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO messages (title, content_encrypted) VALUES (?, ?)",
+                (title, content_encrypted)
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def getAllMessages(self):
+        """Obtiene todos los mensajes."""
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM messages")
+            rows = cursor.fetchall()
+            return [SecureMessage.from_db(row) for row in rows]
+            
+    def getMessageById(self, msg_id):
+        """Obtiene un mensaje por ID."""
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM messages WHERE id = ?", (msg_id,))
+            row = cursor.fetchone()
+            if row:
+                return SecureMessage.from_db(row)
+            return None
+
+    def deleteMessage(self, msg_id):
+        """Elimina un mensaje por ID."""
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+            conn.commit()
+            return cursor.rowcount
 
         

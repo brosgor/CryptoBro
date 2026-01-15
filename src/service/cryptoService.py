@@ -75,3 +75,16 @@ class CryptoService:
     def getAllItems(self) -> list:
         """Obtiene todas las claves almacenadas."""
         return self.crypto_bro.getAllItems()
+
+    def save_message(self, title: str, message: str, key: str) -> None:
+        """Encripta y guarda un mensaje."""
+        encrypted = self.encrypt_message(message, key)
+        self.crypto_bro.saveMessage(title, encrypted)
+        
+    def get_all_messages(self) -> list:
+        """Obtiene todos los mensajes."""
+        return self.crypto_bro.getAllMessages()
+        
+    def delete_message(self, msg_id: int) -> None:
+        """Elimina un mensaje."""
+        self.crypto_bro.deleteMessage(msg_id)

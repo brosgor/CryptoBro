@@ -191,3 +191,20 @@ class CryptoBro:
     def getAllItems(self)-> list:
         """Obtiene todos los registros almacenados."""
         return self.db.getAllItems()
+
+    # Message methods
+    def saveMessage(self, title: str, encrypted_message: str) -> int:
+        """Guarda un mensaje encriptado en la base de datos."""
+        return self.db.addMessage(title, encrypted_message)
+
+    def getAllMessages(self) -> list:
+        """Obtiene todos los mensajes almacenados."""
+        return self.db.getAllMessages()
+
+    def getMessageById(self, msg_id: int):
+        """Obtiene un mensaje específico por ID."""
+        return self.db.getMessageById(msg_id)
+        
+    def deleteMessage(self, msg_id: int):
+        """Elimina un mensaje."""
+        return self.db.deleteMessage(msg_id)
