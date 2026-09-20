@@ -88,18 +88,25 @@ class CryptoService:
         seconds=0,
         delete_original=False,
     ) -> tuple:
-        """Soft time-lock: clave aleatoria; unlock_at en bóveda. No es hard-crypto."""
+        """
+        Cápsula offline (TLP): la clave no queda en claro; al abrir hay que
+        resolver squarings ≈ duración de CPU. Sin reloj ni red.
+        """
+        from domain.timelock import seal_to_str
+
         total = timedelta(
             days=years * 365 + days, hours=hours, minutes=minutes, seconds=seconds
         )
-        if total.total_seconds() <= 0:
+        secs = total.total_seconds()
+        if secs <= 0:
             raise ValueError("La duración debe ser mayor que cero")
 
         key = self.generate_key()
         extension, used_key, bros_path = self.encryptFile(file_path, key, generated=True)
+        puzzle = seal_to_str(used_key, secs)
         unlock_at = (datetime.now() + total).isoformat(timespec="seconds")
         name = label.strip() or os.path.basename(file_path)
-        cid = self.crypto_bro.addCapsule(name, bros_path, used_key, unlock_at, extension)
+        cid = self.crypto_bro.addCapsule(name, bros_path, puzzle, unlock_at, extension)
 
         if delete_original and os.path.exists(file_path):
             size = os.path.getsize(file_path)
@@ -107,21 +114,29 @@ class CryptoService:
                 f.write(os.urandom(size))
             os.remove(file_path)
 
-        return cid, unlock_at, bros_path
+        return cid, unlock_at, bros_path, int(secs)
 
     def get_all_capsules(self) -> list:
         return self.crypto_bro.getAllCapsules()
 
-    def unlock_capsule(self, capsule_id: int) -> None:
+    def unlock_capsule(self, capsule_id: int, progress=None) -> None:
+        from domain.timelock import is_puzzle, open_puzzle
+
         cap = self.crypto_bro.getCapsuleById(capsule_id)
         if not cap:
             raise ValueError("Cápsula no encontrada")
-        unlock_at = datetime.fromisoformat(cap.unlock_at)
-        if datetime.now() < unlock_at:
-            raise ValueError("Aún no es hora de desbloquear")
         if not os.path.exists(cap.bros_path):
             raise FileNotFoundError(f"No está el .bros: {cap.bros_path}")
-        self.decryptFile(cap.bros_path, cap.key, extension=cap.extension, generated=True)
+
+        if is_puzzle(cap.key):
+            real_key = open_puzzle(cap.key, progress=progress)
+        else:
+            unlock_at = datetime.fromisoformat(cap.unlock_at)
+            if datetime.now() < unlock_at:
+                raise ValueError("Aún no es hora (cápsula antigua por reloj local)")
+            real_key = cap.key
+
+        self.decryptFile(cap.bros_path, real_key, extension=cap.extension, generated=True)
 
     def delete_capsule(self, capsule_id: int) -> None:
         self.crypto_bro.deleteCapsule(capsule_id)

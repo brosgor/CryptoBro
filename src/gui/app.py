@@ -705,14 +705,14 @@ class CryptoApp:
 
         ttk.Label(
             frame,
-            text="Cápsula temporal (bloqueo suave)",
+            text="Cápsula temporal (puzzle offline)",
             font=("DejaVu Sans", 12, "bold"),
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             frame,
-            text="La app genera una clave que tú no ves. El botón Desbloquear solo aparece "
-            "cuando pasa el tiempo. No es prueba criptográfica: quien tenga la bóveda o "
-            "cambie el reloj del sistema podría adelantar el acceso.",
+            text="100 % local: la clave se envuelve en un time-lock (squarings). "
+            "Al desbloquear, la CPU debe trabajar ≈ la duración elegida. "
+            "No usa reloj ni internet. CPU más rápida = abre antes.",
             wraplength=760,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
@@ -734,7 +734,7 @@ class CryptoApp:
         self.cap_label = tk.StringVar()
         ttk.Entry(form, textvariable=self.cap_label).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
 
-        ttk.Label(form, text="Duración:").grid(row=2, column=0, sticky="nw", pady=6)
+        ttk.Label(form, text="Trabajo CPU:").grid(row=2, column=0, sticky="nw", pady=6)
         dur = ttk.Frame(form)
         dur.grid(row=2, column=1, columnspan=2, sticky="w")
         self.cap_years = tk.StringVar(value="0")
@@ -768,22 +768,19 @@ class CryptoApp:
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
 
-        cols = ("id", "label", "unlock", "countdown", "path")
+        cols = ("id", "label", "work", "path")
         self.cap_tree = ttk.Treeview(right, columns=cols, show="headings", height=10)
         self.cap_tree.heading("id", text="ID")
         self.cap_tree.heading("label", text="Etiqueta")
-        self.cap_tree.heading("unlock", text="Se abre")
-        self.cap_tree.heading("countdown", text="Restante")
+        self.cap_tree.heading("work", text="Trabajo CPU")
         self.cap_tree.heading("path", text="Archivo")
         self.cap_tree.column("id", width=40)
-        self.cap_tree.column("label", width=120)
-        self.cap_tree.column("unlock", width=140)
-        self.cap_tree.column("countdown", width=140)
-        self.cap_tree.column("path", width=220)
+        self.cap_tree.column("label", width=140)
+        self.cap_tree.column("work", width=120)
+        self.cap_tree.column("path", width=260)
         self.cap_tree.grid(row=0, column=0, sticky="nsew")
         self.cap_tree.bind("<<TreeviewSelect>>", self._on_capsule_select)
 
-        # Contador visual (anillo Canvas)
         anim = ttk.Frame(right)
         anim.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         self.cap_timer_canvas = tk.Canvas(
@@ -798,19 +795,19 @@ class CryptoApp:
             anchor="w"
         )
         ttk.Label(txt, textvariable=self.cap_timer_sub, style="Hint.TLabel").pack(anchor="w")
-        self._cap_anim_totals = {}  # id → segundos totales al primer vista (progreso del anillo)
+        self._cap_unlock_progress = None  # (done, total) mientras resuelve
 
         btns = ttk.Frame(right)
         btns.grid(row=2, column=0, sticky="ew", pady=8)
         self.btn_unlock_cap = RoundedButton(
-            btns, text="Desbloquear", command=self.unlock_selected_capsule, state="disabled"
+            btns, text="Resolver / Desbloquear", command=self.unlock_selected_capsule, state="disabled"
         )
         self.btn_unlock_cap.pack(side="left", padx=4)
         RoundedButton(btns, text="Actualizar", command=self.refresh_capsules).pack(side="left", padx=4)
         RoundedButton(btns, text="Eliminar", command=self.delete_selected_capsule).pack(side="left", padx=4)
 
         self._draw_cap_timer(None)
-        self._capsule_tick()
+        self.refresh_capsules()
 
     def _browse_capsule_file(self):
         path = filedialog.askopenfilename()
@@ -826,13 +823,35 @@ class CryptoApp:
         except ValueError as e:
             raise ValueError(f"{name} inválido") from e
 
+    def _cap_work_label(self, cap) -> str:
+        from domain.timelock import is_puzzle
+        import json
+
+        if is_puzzle(cap.key):
+            try:
+                secs = int(json.loads(cap.key).get("secs", 0))
+                return self._fmt_duration(secs)
+            except Exception:
+                return "puzzle"
+        return "reloj (legado)"
+
+    @staticmethod
+    def _fmt_duration(secs: int) -> str:
+        if secs < 60:
+            return f"~{secs}s CPU"
+        if secs < 3600:
+            return f"~{secs // 60}m CPU"
+        if secs < 86400:
+            return f"~{secs // 3600}h CPU"
+        return f"~{secs // 86400}d CPU"
+
     def create_capsule(self):
         path = self.cap_file.get().strip()
         if not path:
             messagebox.showerror("Error", "Selecciona un archivo")
             return
         try:
-            cid, unlock_at, bros = self.service.create_time_capsule(
+            cid, unlock_at, bros, secs = self.service.create_time_capsule(
                 file_path=path,
                 label=self.cap_label.get(),
                 years=self._parse_int(self.cap_years, "Años"),
@@ -844,15 +863,10 @@ class CryptoApp:
             )
             messagebox.showinfo(
                 "Cápsula creada",
-                f"ID {cid}\nSe podrá desbloquear desde:\n{unlock_at}\n\n"
+                f"ID {cid}\nTrabajo al desbloquear: {self._fmt_duration(secs)}\n\n"
                 f"Archivo: {bros}\n\n"
-                "No verás la clave. Espera el contador.",
+                "Offline. La clave no está en claro: hay que resolver el puzzle con CPU.",
             )
-            # anillo: 100% = duración real al crear
-            from datetime import datetime
-
-            total = max((datetime.fromisoformat(unlock_at) - datetime.now()).total_seconds(), 1.0)
-            self._cap_anim_totals[cid] = total
             self.cap_file.set("")
             self.refresh_capsules()
             if self.cap_tree.exists(str(cid)):
@@ -861,77 +875,36 @@ class CryptoApp:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def _format_remaining(self, unlock_at_iso: str):
-        from datetime import datetime
+    def _draw_cap_timer(self, cap, frac=None, status=None):
+        import math
 
-        unlock_at = datetime.fromisoformat(unlock_at_iso)
-        rem = unlock_at - datetime.now()
-        secs_left = rem.total_seconds()
-        if secs_left <= 0:
-            return "LISTO", True, 0
-        total = int(secs_left)
-        years, rem_s = divmod(total, 365 * 24 * 3600)
-        days, rem_s = divmod(rem_s, 24 * 3600)
-        hours, rem_s = divmod(rem_s, 3600)
-        mins, secs = divmod(rem_s, 60)
-        parts = []
-        if years:
-            parts.append(f"{years}a")
-        if days:
-            parts.append(f"{days}d")
-        parts.append(f"{hours:02d}:{mins:02d}:{secs:02d}")
-        return " ".join(parts), False, secs_left
-
-    def _draw_cap_timer(self, cap):
-        """Anillo de progreso + texto grande. Sin created_at: el 100% = restante al primer select."""
         c = self.cap_timer_canvas
         c.delete("all")
         pad, size = 8, 96
         x0, y0, x1, y1 = pad, pad, size - pad, size - pad
-        # pista
         c.create_oval(x0, y0, x1, y1, outline=T.BORDER, width=8)
-        if cap is None:
+        if cap is None and frac is None:
             self.cap_timer_text.set("Selecciona una cápsula")
-            self.cap_timer_sub.set("")
+            self.cap_timer_sub.set("Offline · time-lock puzzle")
             return
 
-        label, ready, secs_left = self._format_remaining(cap.unlock_at)
-        if ready:
-            c.create_oval(x0, y0, x1, y1, outline=T.OK, width=8)
-            # checkmark
-            c.create_text(size // 2, size // 2, text="✓", fill=T.OK, font=("DejaVu Sans", 28, "bold"))
-            self.cap_timer_text.set("LISTO")
-            self.cap_timer_sub.set(cap.label or f"#{cap.id}")
+        if frac is not None:
+            extent = -360.0 * max(0.0, min(1.0, frac))
+            c.create_arc(
+                x0, y0, x1, y1, start=90, extent=extent, style="arc", outline=T.ACCENT, width=9
+            )
+            ang = math.radians(90 + extent)
+            cx = cy = size / 2
+            r = (size - pad * 2) / 2
+            px, py = cx + r * math.cos(ang), cy - r * math.sin(ang)
+            c.create_oval(px - 4, py - 4, px + 4, py + 4, fill=T.ACCENT, outline="")
+            self.cap_timer_text.set(status or f"{int(frac * 100)}%")
+            self.cap_timer_sub.set("Resolviendo puzzle…")
             return
 
-        totals = getattr(self, "_cap_anim_totals", {})
-        if cap.id not in totals:
-            totals[cap.id] = max(secs_left, 1.0)
-            self._cap_anim_totals = totals
-        total = totals[cap.id]
-        frac = max(0.0, min(1.0, secs_left / total))
-        # arco restante (reloj: -90° = arriba)
-        extent = -360.0 * frac
-        # pulso suave en el grosor según el segundo
-        pulse = 8 + (1 if int(secs_left) % 2 == 0 else 0)
-        c.create_arc(
-            x0, y0, x1, y1,
-            start=90,
-            extent=extent,
-            style="arc",
-            outline=T.ACCENT,
-            width=pulse,
-        )
-        # punto en la punta del arco
-        import math
-        ang = math.radians(90 + extent)
-        cx = cy = size / 2
-        r = (size - pad * 2) / 2
-        px, py = cx + r * math.cos(ang), cy - r * math.sin(ang)
-        c.create_oval(px - 4, py - 4, px + 4, py + 4, fill=T.ACCENT, outline="")
-
-        self.cap_timer_text.set(label)
-        self.cap_timer_sub.set(f"{cap.label or f'#{cap.id}'} · {int(frac * 100)}% restante")
+        c.create_oval(x0 + 12, y0 + 12, x1 - 12, y1 - 12, outline=T.ACCENT, width=3)
+        self.cap_timer_text.set(self._cap_work_label(cap))
+        self.cap_timer_sub.set(f"{cap.label or f'#{cap.id}'} · pulsa Resolver")
 
     def refresh_capsules(self):
         if not hasattr(self, "cap_tree"):
@@ -941,27 +914,20 @@ class CryptoApp:
             self.cap_tree.delete(i)
         self._capsules_cache = self.service.get_all_capsules()
         for c in self._capsules_cache:
-            countdown, ready, _ = self._format_remaining(c.unlock_at)
             self.cap_tree.insert(
                 "",
                 "end",
                 iid=str(c.id),
-                values=(c.id, c.label, c.unlock_at, countdown, c.bros_path),
-                tags=("ready",) if ready else ("locked",),
+                values=(c.id, c.label, self._cap_work_label(c), c.bros_path),
             )
-        self.cap_tree.tag_configure("ready", foreground=T.OK)
-        self.cap_tree.tag_configure("locked", foreground=T.FG_MUTED)
         if sel and self.cap_tree.exists(sel[0]):
             self.cap_tree.selection_set(sel[0])
             self.cap_tree.focus(sel[0])
         self._on_capsule_select()
 
-    def _capsule_tick(self):
-        self.refresh_capsules()
-        self.root.after(1000, self._capsule_tick)
-
     def _on_capsule_select(self, event=None):
         sel = self.cap_tree.selection() if hasattr(self, "cap_tree") else ()
+        unlocking = getattr(self, "_cap_unlocking", False)
         if not sel:
             self.btn_unlock_cap.config(state="disabled")
             self._draw_cap_timer(None)
@@ -972,26 +938,55 @@ class CryptoApp:
             self.btn_unlock_cap.config(state="disabled")
             self._draw_cap_timer(None)
             return
-        _, ready, _ = self._format_remaining(cap.unlock_at)
-        self.btn_unlock_cap.config(state="normal" if ready else "disabled")
-        self._draw_cap_timer(cap)
+        self.btn_unlock_cap.config(state="disabled" if unlocking else "normal")
+        if not unlocking:
+            self._draw_cap_timer(cap)
 
     def unlock_selected_capsule(self):
+        import threading
+
         sel = self.cap_tree.selection()
-        if not sel:
+        if not sel or getattr(self, "_cap_unlocking", False):
             return
         cid = int(sel[0])
-        try:
-            self.service.unlock_capsule(cid)
-            messagebox.showinfo(
-                "Listo",
-                f"Cápsula desbloqueada.\nArchivo restaurado con su nombre original.",
+        self._cap_unlocking = True
+        self.btn_unlock_cap.config(state="disabled")
+        self._draw_cap_timer(None, frac=0.0, status="0%")
+
+        def on_progress(done, total):
+            frac = done / max(total, 1)
+            self.root.after(
+                0,
+                lambda f=frac: self._draw_cap_timer(
+                    None, frac=f, status=f"{int(f * 100)}%"
+                ),
             )
-            if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
-                self.service.delete_capsule(cid)
-            self.refresh_capsules()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+
+        def work():
+            err = None
+            try:
+                self.service.unlock_capsule(cid, progress=on_progress)
+            except Exception as e:
+                err = e
+
+            def done():
+                self._cap_unlocking = False
+                if err:
+                    messagebox.showerror("Error", str(err))
+                    self._on_capsule_select()
+                    return
+                self._draw_cap_timer(None, frac=1.0, status="LISTO")
+                messagebox.showinfo(
+                    "Listo",
+                    "Cápsula desbloqueada.\nArchivo restaurado con su nombre original.",
+                )
+                if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
+                    self.service.delete_capsule(cid)
+                self.refresh_capsules()
+
+            self.root.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def delete_selected_capsule(self):
         sel = self.cap_tree.selection()
