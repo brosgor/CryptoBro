@@ -46,6 +46,7 @@ class CryptoApp:
         self.tab_capsules = ttk.Frame(tabControl)
         self.tab_messages = ttk.Frame(tabControl)
         self.tab_hash = ttk.Frame(tabControl)
+        self.tab_gen = ttk.Frame(tabControl)
         self.tab_keys = ttk.Frame(tabControl)
 
         tabControl.add(self.tab_encrypt, text="Cifrar")
@@ -53,6 +54,7 @@ class CryptoApp:
         tabControl.add(self.tab_capsules, text="Cápsulas")
         tabControl.add(self.tab_messages, text="Notas")
         tabControl.add(self.tab_hash, text="Hash")
+        tabControl.add(self.tab_gen, text="Generador")
         tabControl.add(self.tab_keys, text="Claves")
 
         tabControl.pack(expand=1, fill="both", padx=10, pady=10)
@@ -62,6 +64,7 @@ class CryptoApp:
         self.setup_capsules_tab()
         self.setup_messages_tab()
         self.setup_hash_tab()
+        self.setup_generator_tab()
         self.setup_keys_tab()
 
     def setup_encrypt_tab(self):
@@ -341,6 +344,120 @@ class CryptoApp:
             ).grid(row=i, column=2, padx=4)
 
         self._toggle_hash_mode()
+
+    def setup_generator_tab(self):
+        frame = ttk.Frame(self.tab_gen, padding="16")
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Generador de contraseñas", font=("DejaVu Sans", 12, "bold")).grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        ttk.Label(
+            frame,
+            text="CSPRNG (secrets). Contraseña alfanumérica o frase mnemónica de words.json. "
+            "Entropía ≈ length × log₂(alfabeto). Objetivo práctico: ≥ 80 bits.",
+            wraplength=700,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 12))
+
+        self.gen_mode = tk.StringVar(value="password")
+        modes = ttk.Frame(frame)
+        modes.grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Radiobutton(
+            modes, text="Contraseña", variable=self.gen_mode, value="password", command=self._toggle_gen_mode
+        ).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(
+            modes, text="Frase (palabras)", variable=self.gen_mode, value="passphrase", command=self._toggle_gen_mode
+        ).pack(side="left")
+
+        self.gen_length = tk.IntVar(value=20)
+        self.gen_words = tk.IntVar(value=8)
+        self.gen_lower = tk.BooleanVar(value=True)
+        self.gen_upper = tk.BooleanVar(value=True)
+        self.gen_digits = tk.BooleanVar(value=True)
+        self.gen_symbols = tk.BooleanVar(value=True)
+
+        self.gen_opts = ttk.Frame(frame)
+        self.gen_opts.grid(row=3, column=0, columnspan=3, sticky="ew", pady=4)
+
+        self.lbl_gen_len = ttk.Label(self.gen_opts, text="Longitud:")
+        self.spin_gen_len = ttk.Spinbox(
+            self.gen_opts, from_=8, to=128, textvariable=self.gen_length, width=6
+        )
+        self.chk_lower = ttk.Checkbutton(self.gen_opts, text="a-z", variable=self.gen_lower)
+        self.chk_upper = ttk.Checkbutton(self.gen_opts, text="A-Z", variable=self.gen_upper)
+        self.chk_digits = ttk.Checkbutton(self.gen_opts, text="0-9", variable=self.gen_digits)
+        self.chk_symbols = ttk.Checkbutton(self.gen_opts, text="Símbolos", variable=self.gen_symbols)
+
+        self.lbl_gen_words = ttk.Label(self.gen_opts, text="Palabras:")
+        self.spin_gen_words = ttk.Spinbox(
+            self.gen_opts, from_=4, to=12, textvariable=self.gen_words, width=6
+        )
+
+        RoundedButton(frame, text="Generar", command=self._run_generator).grid(
+            row=4, column=1, sticky="e", pady=12
+        )
+
+        self.gen_result = tk.StringVar()
+        self.gen_entropy = tk.StringVar(value="")
+        ttk.Label(frame, text="Resultado:").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.gen_result).grid(
+            row=5, column=1, sticky="ew", padx=4, pady=4
+        )
+        RoundedButton(frame, text="Copiar", command=lambda: self._copy_hash(self.gen_result.get())).grid(
+            row=5, column=2, padx=4
+        )
+        ttk.Label(frame, textvariable=self.gen_entropy).grid(
+            row=6, column=0, columnspan=3, sticky="w", pady=(4, 0)
+        )
+
+        self._toggle_gen_mode()
+        self._run_generator()
+
+    def _toggle_gen_mode(self):
+        for w in (
+            self.lbl_gen_len,
+            self.spin_gen_len,
+            self.chk_lower,
+            self.chk_upper,
+            self.chk_digits,
+            self.chk_symbols,
+            self.lbl_gen_words,
+            self.spin_gen_words,
+        ):
+            w.grid_forget()
+        if self.gen_mode.get() == "password":
+            self.lbl_gen_len.grid(row=0, column=0, sticky="w", padx=(0, 6))
+            self.spin_gen_len.grid(row=0, column=1, sticky="w", padx=(0, 16))
+            self.chk_lower.grid(row=0, column=2, padx=4)
+            self.chk_upper.grid(row=0, column=3, padx=4)
+            self.chk_digits.grid(row=0, column=4, padx=4)
+            self.chk_symbols.grid(row=0, column=5, padx=4)
+        else:
+            self.lbl_gen_words.grid(row=0, column=0, sticky="w", padx=(0, 6))
+            self.spin_gen_words.grid(row=0, column=1, sticky="w")
+
+    def _run_generator(self):
+        try:
+            if self.gen_mode.get() == "passphrase":
+                info = self.service.generate_passphrase_info(int(self.gen_words.get()))
+            else:
+                info = self.service.generate_password(
+                    length=int(self.gen_length.get()),
+                    lower=self.gen_lower.get(),
+                    upper=self.gen_upper.get(),
+                    digits=self.gen_digits.get(),
+                    symbols=self.gen_symbols.get(),
+                )
+            self.gen_result.set(info["password"])
+            bits = info["entropy_bits"]
+            ok = "✓ fuerte" if bits >= 80 else ("aceptable" if bits >= 60 else "débil — sube longitud")
+            kind = "palabras" if info.get("kind") == "passphrase" else "caracteres"
+            self.gen_entropy.set(
+                f"Entropía ≈ {bits} bits ({info['length']} {kind}, alfabeto {info['alphabet_size']}) — {ok}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def _toggle_hash_mode(self):
         mode = self.hash_mode.get()
@@ -652,7 +769,7 @@ class CryptoApp:
         right.rowconfigure(0, weight=1)
 
         cols = ("id", "label", "unlock", "countdown", "path")
-        self.cap_tree = ttk.Treeview(right, columns=cols, show="headings", height=12)
+        self.cap_tree = ttk.Treeview(right, columns=cols, show="headings", height=10)
         self.cap_tree.heading("id", text="ID")
         self.cap_tree.heading("label", text="Etiqueta")
         self.cap_tree.heading("unlock", text="Se abre")
@@ -666,8 +783,25 @@ class CryptoApp:
         self.cap_tree.grid(row=0, column=0, sticky="nsew")
         self.cap_tree.bind("<<TreeviewSelect>>", self._on_capsule_select)
 
+        # Contador visual (anillo Canvas)
+        anim = ttk.Frame(right)
+        anim.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.cap_timer_canvas = tk.Canvas(
+            anim, width=96, height=96, bg=T.BG, highlightthickness=0
+        )
+        self.cap_timer_canvas.pack(side="left", padx=(0, 12))
+        self.cap_timer_text = tk.StringVar(value="Selecciona una cápsula")
+        self.cap_timer_sub = tk.StringVar(value="")
+        txt = ttk.Frame(anim)
+        txt.pack(side="left", fill="x", expand=True)
+        ttk.Label(txt, textvariable=self.cap_timer_text, font=("DejaVu Sans", 16, "bold")).pack(
+            anchor="w"
+        )
+        ttk.Label(txt, textvariable=self.cap_timer_sub, style="Hint.TLabel").pack(anchor="w")
+        self._cap_anim_totals = {}  # id → segundos totales al primer vista (progreso del anillo)
+
         btns = ttk.Frame(right)
-        btns.grid(row=1, column=0, sticky="ew", pady=8)
+        btns.grid(row=2, column=0, sticky="ew", pady=8)
         self.btn_unlock_cap = RoundedButton(
             btns, text="Desbloquear", command=self.unlock_selected_capsule, state="disabled"
         )
@@ -675,6 +809,7 @@ class CryptoApp:
         RoundedButton(btns, text="Actualizar", command=self.refresh_capsules).pack(side="left", padx=4)
         RoundedButton(btns, text="Eliminar", command=self.delete_selected_capsule).pack(side="left", padx=4)
 
+        self._draw_cap_timer(None)
         self._capsule_tick()
 
     def _browse_capsule_file(self):
@@ -713,8 +848,16 @@ class CryptoApp:
                 f"Archivo: {bros}\n\n"
                 "No verás la clave. Espera el contador.",
             )
+            # anillo: 100% = duración real al crear
+            from datetime import datetime
+
+            total = max((datetime.fromisoformat(unlock_at) - datetime.now()).total_seconds(), 1.0)
+            self._cap_anim_totals[cid] = total
             self.cap_file.set("")
             self.refresh_capsules()
+            if self.cap_tree.exists(str(cid)):
+                self.cap_tree.selection_set(str(cid))
+                self._on_capsule_select()
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -723,9 +866,10 @@ class CryptoApp:
 
         unlock_at = datetime.fromisoformat(unlock_at_iso)
         rem = unlock_at - datetime.now()
-        if rem.total_seconds() <= 0:
-            return "LISTO", True
-        total = int(rem.total_seconds())
+        secs_left = rem.total_seconds()
+        if secs_left <= 0:
+            return "LISTO", True, 0
+        total = int(secs_left)
         years, rem_s = divmod(total, 365 * 24 * 3600)
         days, rem_s = divmod(rem_s, 24 * 3600)
         hours, rem_s = divmod(rem_s, 3600)
@@ -736,16 +880,68 @@ class CryptoApp:
         if days:
             parts.append(f"{days}d")
         parts.append(f"{hours:02d}:{mins:02d}:{secs:02d}")
-        return " ".join(parts), False
+        return " ".join(parts), False, secs_left
+
+    def _draw_cap_timer(self, cap):
+        """Anillo de progreso + texto grande. Sin created_at: el 100% = restante al primer select."""
+        c = self.cap_timer_canvas
+        c.delete("all")
+        pad, size = 8, 96
+        x0, y0, x1, y1 = pad, pad, size - pad, size - pad
+        # pista
+        c.create_oval(x0, y0, x1, y1, outline=T.BORDER, width=8)
+        if cap is None:
+            self.cap_timer_text.set("Selecciona una cápsula")
+            self.cap_timer_sub.set("")
+            return
+
+        label, ready, secs_left = self._format_remaining(cap.unlock_at)
+        if ready:
+            c.create_oval(x0, y0, x1, y1, outline=T.OK, width=8)
+            # checkmark
+            c.create_text(size // 2, size // 2, text="✓", fill=T.OK, font=("DejaVu Sans", 28, "bold"))
+            self.cap_timer_text.set("LISTO")
+            self.cap_timer_sub.set(cap.label or f"#{cap.id}")
+            return
+
+        totals = getattr(self, "_cap_anim_totals", {})
+        if cap.id not in totals:
+            totals[cap.id] = max(secs_left, 1.0)
+            self._cap_anim_totals = totals
+        total = totals[cap.id]
+        frac = max(0.0, min(1.0, secs_left / total))
+        # arco restante (reloj: -90° = arriba)
+        extent = -360.0 * frac
+        # pulso suave en el grosor según el segundo
+        pulse = 8 + (1 if int(secs_left) % 2 == 0 else 0)
+        c.create_arc(
+            x0, y0, x1, y1,
+            start=90,
+            extent=extent,
+            style="arc",
+            outline=T.ACCENT,
+            width=pulse,
+        )
+        # punto en la punta del arco
+        import math
+        ang = math.radians(90 + extent)
+        cx = cy = size / 2
+        r = (size - pad * 2) / 2
+        px, py = cx + r * math.cos(ang), cy - r * math.sin(ang)
+        c.create_oval(px - 4, py - 4, px + 4, py + 4, fill=T.ACCENT, outline="")
+
+        self.cap_timer_text.set(label)
+        self.cap_timer_sub.set(f"{cap.label or f'#{cap.id}'} · {int(frac * 100)}% restante")
 
     def refresh_capsules(self):
         if not hasattr(self, "cap_tree"):
             return
+        sel = self.cap_tree.selection()
         for i in self.cap_tree.get_children():
             self.cap_tree.delete(i)
         self._capsules_cache = self.service.get_all_capsules()
         for c in self._capsules_cache:
-            countdown, ready = self._format_remaining(c.unlock_at)
+            countdown, ready, _ = self._format_remaining(c.unlock_at)
             self.cap_tree.insert(
                 "",
                 "end",
@@ -755,6 +951,9 @@ class CryptoApp:
             )
         self.cap_tree.tag_configure("ready", foreground=T.OK)
         self.cap_tree.tag_configure("locked", foreground=T.FG_MUTED)
+        if sel and self.cap_tree.exists(sel[0]):
+            self.cap_tree.selection_set(sel[0])
+            self.cap_tree.focus(sel[0])
         self._on_capsule_select()
 
     def _capsule_tick(self):
@@ -765,14 +964,17 @@ class CryptoApp:
         sel = self.cap_tree.selection() if hasattr(self, "cap_tree") else ()
         if not sel:
             self.btn_unlock_cap.config(state="disabled")
+            self._draw_cap_timer(None)
             return
         cid = int(sel[0])
         cap = next((c for c in getattr(self, "_capsules_cache", []) if c.id == cid), None)
         if not cap:
             self.btn_unlock_cap.config(state="disabled")
+            self._draw_cap_timer(None)
             return
-        _, ready = self._format_remaining(cap.unlock_at)
+        _, ready, _ = self._format_remaining(cap.unlock_at)
         self.btn_unlock_cap.config(state="normal" if ready else "disabled")
+        self._draw_cap_timer(cap)
 
     def unlock_selected_capsule(self):
         sel = self.cap_tree.selection()

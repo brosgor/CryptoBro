@@ -195,5 +195,79 @@ class CryptoService:
         result["files"] = file_count
         return result
 
+    def generate_password(
+        self,
+        length: int = 20,
+        lower: bool = True,
+        upper: bool = True,
+        digits: bool = True,
+        symbols: bool = True,
+    ) -> dict:
+        """
+        Contraseña CSPRNG (secrets). Devuelve texto + bits de entropía aprox.
+        """
+        import math
+        import string
+
+        if length < 8:
+            raise ValueError("Longitud mínima: 8")
+        alphabet = ""
+        if lower:
+            alphabet += string.ascii_lowercase
+        if upper:
+            alphabet += string.ascii_uppercase
+        if digits:
+            alphabet += string.digits
+        if symbols:
+            alphabet += "!@#$%^&*()-_=+[]{}:,.?/"
+        if not alphabet:
+            raise ValueError("Elige al menos un tipo de carácter")
+
+        # garantiza al menos un char de cada clase elegida
+        required = []
+        if lower:
+            required.append(secrets.choice(string.ascii_lowercase))
+        if upper:
+            required.append(secrets.choice(string.ascii_uppercase))
+        if digits:
+            required.append(secrets.choice(string.digits))
+        if symbols:
+            required.append(secrets.choice("!@#$%^&*()-_=+[]{}:,.?/"))
+        if length < len(required):
+            length = len(required)
+
+        rest = [secrets.choice(alphabet) for _ in range(length - len(required))]
+        chars = required + rest
+        # shuffle seguro
+        for i in range(len(chars) - 1, 0, -1):
+            j = secrets.randbelow(i + 1)
+            chars[i], chars[j] = chars[j], chars[i]
+        password = "".join(chars)
+        entropy = length * math.log2(len(alphabet))
+        return {
+            "password": password,
+            "entropy_bits": round(entropy, 1),
+            "alphabet_size": len(alphabet),
+            "length": length,
+        }
+
+    def generate_passphrase_info(self, num_words: int = 8) -> dict:
+        import math
+
+        phrase = self.generate_mnemonic_passphrase(num_words)
+        try:
+            with open(WORDS_JSON, "r", encoding="utf-8") as f:
+                n = len(json.load(f))
+        except Exception:
+            n = 1000
+        entropy = num_words * math.log2(max(n, 2))
+        return {
+            "password": phrase,
+            "entropy_bits": round(entropy, 1),
+            "alphabet_size": n,
+            "length": num_words,
+            "kind": "passphrase",
+        }
+
     def lock(self) -> None:
         self.vault.lock()
