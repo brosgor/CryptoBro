@@ -174,6 +174,9 @@ class Vault:
         path = vault_gor_path(self.name)
         write_gor(path, json.dumps(meta), enc, self.name)
         register_vault_path(path)
+        from domain.paths import unhide_vault_path
+
+        unhide_vault_path(path)
         set_workspace(path.parent)
         set_active_vault_name(self.name)
         self.unlock(password)
@@ -239,17 +242,33 @@ class Vault:
         self._fernet = new_f
         self.flush()
 
-    def delete_vault(self, name: str | None = None, confirm_password: str | None = None) -> None:
-        """Elimina la bóveda del disco. No requiere contraseña (portable / UX pedida)."""
+    def delete_vault(
+        self,
+        name: str | None = None,
+        confirm_password: str | None = None,
+        wipe_file: bool = True,
+    ) -> None:
+        """
+        wipe_file=True  → borra el .gor del disco.
+        wipe_file=False → solo quita de la lista (el archivo permanece).
+        """
+        from domain.paths import hide_vault_path, unhide_vault_path
+
         target = sanitize_vault_name(name or self.name)
         if not self._locked and target == self.name:
             raise VaultError("Bloquea la bóveda antes de eliminarla")
         path = resolve_vault_gor(target) or vault_gor_path(target)
-        if not path.exists():
-            raise VaultError("La bóveda no existe")
-        # confirm_password ignorado a propósito (compat firma)
-        self._shred(path)
-        unregister_vault_path(path)
+        if wipe_file:
+            if not path.exists():
+                raise VaultError("La bóveda no existe")
+            self._shred(path)
+            unregister_vault_path(path)
+            unhide_vault_path(path)
+        else:
+            if path.exists():
+                hide_vault_path(path)
+            else:
+                raise VaultError("La bóveda no existe")
         if get_active_vault_name() == target:
             names = list_vault_names()
             if names:
@@ -344,6 +363,9 @@ class Vault:
             dest.replace(dest.with_suffix(dest.suffix + ".bak"))
         write_gor(dest, meta_text, enc, name)
         register_vault_path(dest)
+        from domain.paths import unhide_vault_path
+
+        unhide_vault_path(dest)
         set_workspace(dest.parent)
         self.select(name)
 

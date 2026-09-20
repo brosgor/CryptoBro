@@ -195,19 +195,61 @@ def unregister_vault_path(gor_path: Path) -> None:
     _save_registry([p for p in _load_registry() if p != s])
 
 
+def _hidden_file() -> Path:
+    return binary_dir() / "cryptobro-hidden.json"
+
+
+def _load_hidden() -> set[str]:
+    p = _hidden_file()
+    if not p.exists():
+        return set()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {str(Path(x).resolve()) for x in data}
+    except Exception:
+        return set()
+
+
+def _save_hidden(paths: set[str]) -> None:
+    p = _hidden_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(sorted(paths), indent=2), encoding="utf-8")
+
+
+def hide_vault_path(gor_path: Path) -> None:
+    """Quita de la lista UI; el .gor sigue en disco."""
+    h = _load_hidden()
+    h.add(str(Path(gor_path).resolve()))
+    _save_hidden(h)
+    unregister_vault_path(gor_path)
+
+
+def unhide_vault_path(gor_path: Path) -> None:
+    h = _load_hidden()
+    h.discard(str(Path(gor_path).resolve()))
+    _save_hidden(h)
+
+
 def list_vault_entries() -> list[tuple[str, Path]]:
-    """[(nombre, path_al_gor), ...] del workspace actual + registro."""
+    """[(nombre, path_al_gor), ...] del workspace actual + registro (sin ocultas)."""
     ensure_data_dir()
+    hidden = _load_hidden()
     found: dict[str, Path] = {}
     ws = get_workspace()
     for p in sorted(ws.glob("*.gor")):
         if p.is_file():
-            found[p.stem] = p.resolve()
+            rp = p.resolve()
+            if str(rp) in hidden:
+                continue
+            found[p.stem] = rp
             register_vault_path(p)
     for raw in _load_registry():
         p = Path(raw)
         if p.is_file() and p.suffix.lower() == ".gor":
-            found[p.stem] = p.resolve()
+            rp = p.resolve()
+            if str(rp) in hidden:
+                continue
+            found[p.stem] = rp
     return sorted(found.items(), key=lambda x: x[0])
 
 

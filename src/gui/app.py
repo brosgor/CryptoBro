@@ -18,6 +18,7 @@ class CryptoApp:
         self._set_icon()
 
         self.service = CryptoService(vault)
+        self.want_switch_vault = False
 
         self.apply_theme()
         self.create_widgets()
@@ -80,11 +81,41 @@ class CryptoApp:
         ttk.Entry(frame, textvariable=self.enc_file_path).grid(row=0, column=1, sticky="ew", pady=5, padx=5)
         RoundedButton(frame, text="Examinar", command=self.browse_encrypt_file).grid(row=0, column=2, padx=5, pady=5)
         
-        # Clave
-        ttk.Label(frame, text="Clave de cifrado:").grid(row=1, column=0, sticky="w", pady=5)
+        # Clave + ver + longitud + generar
+        ttk.Label(frame, text="Clave de cifrado:").grid(row=1, column=0, sticky="nw", pady=5)
         self.enc_key = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.enc_key, show="*").grid(row=1, column=1, sticky="ew", pady=5, padx=5)
-        
+        self.enc_key_len = tk.IntVar(value=20)
+        self.enc_show_key = tk.BooleanVar(value=False)
+        key_box = ttk.Frame(frame)
+        key_box.grid(row=1, column=1, columnspan=2, sticky="ew", pady=5, padx=5)
+        key_box.columnconfigure(0, weight=1)
+
+        key_row = ttk.Frame(key_box)
+        key_row.grid(row=0, column=0, sticky="ew")
+        key_row.columnconfigure(0, weight=1)
+        self.entry_enc_key = ttk.Entry(key_row, textvariable=self.enc_key, show="*")
+        self.entry_enc_key.grid(row=0, column=0, sticky="ew")
+        RoundedButton(
+            key_row, text="⚄ Generar", padx=10, pady=6, command=self._fill_random_encrypt_key
+        ).grid(row=0, column=1, padx=(6, 0))
+
+        opts = ttk.Frame(key_box)
+        opts.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            opts,
+            text="Ver contraseña",
+            variable=self.enc_show_key,
+            command=self._toggle_enc_key_visibility,
+        ).pack(side="left", padx=(0, 12))
+        ttk.Label(opts, text="Longitud:").pack(side="left")
+        ttk.Spinbox(
+            opts, from_=8, to=128, textvariable=self.enc_key_len, width=5
+        ).pack(side="left", padx=4)
+        self.enc_key_entropy = tk.StringVar(value="")
+        ttk.Label(opts, textvariable=self.enc_key_entropy, style="Hint.TLabel").pack(
+            side="left", padx=(8, 0)
+        )
+
         # Guardar en bóveda
         self.store_key_var = tk.BooleanVar(value=True)
         cb = ttk.Checkbutton(frame, text="¿Guardar clave en la bóveda?", variable=self.store_key_var, command=self.toggle_encrypt_pass_info)
@@ -112,6 +143,23 @@ class CryptoApp:
         filename = filedialog.askopenfilename()
         if filename:
             self.enc_file_path.set(filename)
+
+    def _toggle_enc_key_visibility(self):
+        self.entry_enc_key.config(show="" if self.enc_show_key.get() else "*")
+
+    def _fill_random_encrypt_key(self):
+        """Rellena la clave con CSPRNG; longitud según el spinbox."""
+        try:
+            length = int(self.enc_key_len.get())
+            info = self.service.generate_password(length=length)
+            self.enc_key.set(info["password"])
+            self.enc_key_entropy.set(f"≈ {info['entropy_bits']} bits")
+            self.root.clipboard_clear()
+            self.root.clipboard_append(info["password"])
+            self.enc_show_key.set(True)
+            self._toggle_enc_key_visibility()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def perform_encryption(self):
         file_path = self.enc_file_path.get()
@@ -580,16 +628,43 @@ class CryptoApp:
         vault_btns = ttk.Frame(frame)
         vault_btns.pack(pady=6)
         RoundedButton(
+            vault_btns, text="Bloquear bóveda", command=self.lock_vault
+        ).pack(side="left", padx=4)
+        RoundedButton(
+            vault_btns, text="Cambiar de bóveda", command=self.go_vault_selector
+        ).pack(side="left", padx=4)
+        RoundedButton(
             vault_btns, text="Cambiar clave de bloqueo", command=self.change_lock_password
         ).pack(side="left", padx=4)
+
+        vault_btns2 = ttk.Frame(frame)
+        vault_btns2.pack(pady=4)
         RoundedButton(
-            vault_btns, text="Vaciar bóveda", command=self.reset_current_vault
+            vault_btns2, text="Vaciar bóveda", command=self.reset_current_vault
         ).pack(side="left", padx=4)
         RoundedButton(
-            vault_btns, text="Eliminar esta bóveda", command=self.delete_current_vault
+            vault_btns2, text="Quitar bóveda", command=self.delete_current_vault
         ).pack(side="left", padx=4)
 
         self.refresh_keys_list()
+
+    def lock_vault(self):
+        """Cierra la sesión y vuelve al selector de bóvedas."""
+        if not messagebox.askyesno(
+            "Bloquear",
+            "¿Bloquear esta bóveda y volver a la pantalla de inicio?",
+        ):
+            return
+        self.want_switch_vault = True
+        try:
+            self.service.lock()
+        except Exception:
+            pass
+        self.root.destroy()
+
+    def go_vault_selector(self):
+        """Salir de esta bóveda (mismo efecto que bloquear)."""
+        self.lock_vault()
 
     def change_lock_password(self):
         from tkinter import simpledialog
@@ -636,13 +711,27 @@ class CryptoApp:
     def delete_current_vault(self):
         name = self.service.vault.name
         if not messagebox.askyesno(
-            "Eliminar bóveda",
-            f"¿Eliminar «{name}» y cerrar?\nNo se pide clave.",
+            "Quitar bóveda",
+            f"¿Quitar «{name}» de la lista?\n\n"
+            "El archivo .gor seguirá en disco (puedes importarlo otra vez).",
         ):
             return
+        wipe = messagebox.askyesno(
+            "¿Eliminar del disco?",
+            f"¿Quieres también borrar el archivo .gor de «{name}»?\n\n"
+            "Sí = eliminarla por completo (irreversible).\n"
+            "No = solo quitarla de la lista.",
+        )
         try:
-            self.service.delete_current_vault()
-            messagebox.showinfo("Eliminada", f"Bóveda «{name}» eliminada.")
+            self.service.delete_current_vault(wipe_file=wipe)
+            if wipe:
+                messagebox.showinfo("Eliminada", f"«{name}» borrada del disco.")
+            else:
+                messagebox.showinfo(
+                    "Lista",
+                    f"«{name}» quitada de la lista.\nEl .gor sigue en la carpeta de trabajo.",
+                )
+            self.want_switch_vault = True
             self.root.destroy()
         except Exception as e:
             messagebox.showerror("Error", str(e))

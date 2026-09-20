@@ -62,7 +62,7 @@ class UnlockDialog:
             fill="x", pady=3
         )
         RoundedButton(
-            self.actions, text="Eliminar bóveda (sin clave)", command=self._delete_selected
+            self.actions, text="Quitar bóveda", command=self._delete_selected
         ).pack(fill="x", pady=3)
         RoundedButton(
             self.actions, text="Importar bóveda (.gor)", command=self._restore
@@ -207,20 +207,34 @@ class UnlockDialog:
             messagebox.showerror("Error", "No hay bóveda seleccionada")
             return
         if not messagebox.askyesno(
-            "Eliminar bóveda",
-            f"¿Eliminar «{selected}»?\n"
-            "No se pide clave. Se borra el archivo .gor del disco.",
+            "Quitar bóveda",
+            f"¿Quitar «{selected}» de la lista?\n\n"
+            "El archivo .gor seguirá en disco (puedes importarlo otra vez).",
         ):
             return
+        wipe = messagebox.askyesno(
+            "¿Eliminar del disco?",
+            f"¿Quieres también borrar el archivo .gor de «{selected}»?\n\n"
+            "Sí = eliminarla por completo (irreversible).\n"
+            "No = solo quitarla de la lista.",
+        )
         try:
             if not self.vault._locked and self.vault.name == selected:
                 self.vault.lock()
-            self.vault.delete_vault(selected)
-            messagebox.showinfo("Listo", f"Bóveda «{selected}» eliminada.")
+            self.vault.delete_vault(selected, wipe_file=wipe)
+            if wipe:
+                messagebox.showinfo("Listo", f"«{selected}» borrada del disco.")
+            else:
+                messagebox.showinfo(
+                    "Listo",
+                    f"«{selected}» quitada de la lista.\nPuedes reimportar el .gor si lo necesitas.",
+                )
             self.pw.set("")
             self._reload_list()
             self._refresh_mode()
         except VaultError as e:
+            messagebox.showerror("Error", str(e))
+        except Exception as e:
             messagebox.showerror("Error", str(e))
 
     def _restore(self):

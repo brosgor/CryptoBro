@@ -180,10 +180,14 @@ class CryptoService:
         self.vault.reset_contents(password)
         self.crypto_bro = CryptoBro(self.vault)
 
-    def delete_current_vault(self, password: str | None = None) -> None:
+    def delete_current_vault(self, wipe_file: bool = True) -> None:
         name = self.vault.name
         self.vault.lock()
-        self.vault.delete_vault(name)
+        self.vault.delete_vault(name, wipe_file=wipe_file)
+
+    def forget_current_vault(self) -> None:
+        """Quita de la lista; conserva el .gor en disco."""
+        self.delete_current_vault(wipe_file=False)
 
     def hash_bytes(self, data: bytes) -> dict:
         return {
