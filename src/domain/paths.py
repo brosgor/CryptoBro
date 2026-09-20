@@ -38,6 +38,20 @@ def binary_dir() -> Path:
     override = os.environ.get("CRYPTOBRO_HOME", "").strip()
     if override:
         return Path(override).expanduser().resolve()
+    # AppImage: carpeta del .AppImage (escribible); si no, ~/CryptoBro
+    appimage = os.environ.get("APPIMAGE", "").strip()
+    if appimage:
+        parent = Path(appimage).resolve().parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+            test = parent / ".cryptobro-write-test"
+            test.write_text("ok", encoding="utf-8")
+            test.unlink(missing_ok=True)
+            return parent
+        except OSError:
+            home = Path.home() / "CryptoBro"
+            home.mkdir(parents=True, exist_ok=True)
+            return home
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     # desarrollo: raíz del repo
