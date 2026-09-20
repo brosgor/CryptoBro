@@ -40,10 +40,12 @@ jobs:
       - name: AppImage
         env:
           ARCH: x86_64
+          ARCHITECTURE: x86_64
           CI: "1"
         run: |
           chmod +x packaging/make_appimage.sh
-          ./packaging/make_appimage.sh dist/CryptoBro dist/CryptoBro-x86_64.AppImage
+          ./packaging/make_appimage.sh "$(pwd)/dist/CryptoBro" "$(pwd)/dist/CryptoBro-x86_64.AppImage"
+          test -f dist/CryptoBro-x86_64.AppImage
 
       - uses: actions/upload-artifact@v4
         with:

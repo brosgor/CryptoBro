@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Empaqueta el binario PyInstaller (onefile) en un AppImage.
-# Uso: ./packaging/make_appimage.sh dist/CryptoBro
+# Uso: ./packaging/make_appimage.sh [binario] [salida.AppImage]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${1:-$ROOT/dist/CryptoBro}"
 OUT="${2:-$ROOT/dist/CryptoBro-x86_64.AppImage}"
+
+# rutas absolutas (si cd a dist, una OUT relativa crea dist/dist/…)
+[[ "$BIN" = /* ]] || BIN="$ROOT/$BIN"
+[[ "$OUT" = /* ]] || OUT="$ROOT/$OUT"
+mkdir -p "$(dirname "$OUT")"
+
 APPDIR="$ROOT/dist/CryptoBro.AppDir"
 
 if [[ ! -f "$BIN" ]]; then
@@ -27,7 +33,7 @@ Name=CryptoBro
 Exec=CryptoBro
 Icon=cryptobro
 Type=Application
-Categories=Utility;Security;
+Categories=Utility;System;Security;
 Comment=Cifrado portable offline
 Terminal=false
 EOF
@@ -35,13 +41,12 @@ EOF
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-export TCL_LIBRARY="${TCL_LIBRARY:-}"
-export TK_LIBRARY="${TK_LIBRARY:-}"
 exec "$HERE/usr/bin/CryptoBro" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
 ARCH="${ARCH:-x86_64}"
+export ARCHITECTURE="$ARCH"
 TOOL="$ROOT/dist/appimagetool-${ARCH}.AppImage"
 if [[ ! -f "$TOOL" ]]; then
   curl -fsSL -o "$TOOL" \
@@ -49,13 +54,17 @@ if [[ ! -f "$TOOL" ]]; then
   chmod +x "$TOOL"
 fi
 
-# En CI a veces hace falta --appimage-extract-and-run
-if [[ -n "${CI:-}" ]] || ! "$TOOL" --version >/dev/null 2>&1; then
+# Extraer tool en CI (FUSE no siempre disponible) y generar en abs path
+if [[ -n "${CI:-}" ]] || ! "$TOOL" --appimage-extract-and-run --version >/dev/null 2>&1; then
+  EXTRACT="$ROOT/dist/squashfs-root"
+  rm -rf "$EXTRACT"
   cd "$ROOT/dist"
-  "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT"
+  "$TOOL" --appimage-extract
+  "$EXTRACT/AppRun" "$APPDIR" "$OUT"
 else
   "$TOOL" "$APPDIR" "$OUT"
 fi
 
 chmod +x "$OUT"
+ls -lh "$OUT"
 echo "AppImage → $OUT"
