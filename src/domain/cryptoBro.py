@@ -99,7 +99,7 @@ class CryptoBro:
         if len(name_bytes) > 65535:
             raise ValueError("Nombre de archivo demasiado largo")
 
-        directory = os.path.dirname(os.path.abspath(file_path)) or "."
+        directory = str(__import__("domain.paths", fromlist=["cipher_dir"]).cipher_dir())
         while True:
             opaque = secrets.token_hex(16) + ".bros"
             encrypted_path = os.path.join(directory, opaque)
@@ -148,7 +148,9 @@ class CryptoBro:
 
         fernet = Fernet(key.encode())
         decrypted = fernet.decrypt(encrypted)
-        directory = os.path.dirname(os.path.abspath(file_path)) or "."
+        from domain.paths import plain_dir
+
+        directory = str(plain_dir())
 
         if original_name:
             # evita path traversal

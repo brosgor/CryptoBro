@@ -1,4 +1,4 @@
-"""Pantalla: elegir bóveda / registrar / desbloquear / eliminar / restaurar."""
+"""Inicio portable: workspace junto al binario (o el que elijas)."""
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from gui.widgets import RoundedButton
@@ -6,7 +6,15 @@ from gui import theme as T
 from gui.theme import apply_ttk_theme
 
 from domain.vault import Vault, VaultError
-from domain.paths import list_vault_names, sanitize_vault_name
+from domain.paths import (
+    binary_dir,
+    get_workspace,
+    list_vault_names,
+    register_vault_path,
+    sanitize_vault_name,
+    set_workspace,
+    vault_gor_path,
+)
 
 
 class UnlockDialog:
@@ -17,7 +25,7 @@ class UnlockDialog:
         self.retry = False
 
         root.title("CryptoBro — Bóvedas")
-        root.geometry("480x520")
+        root.geometry("500x560")
         root.configure(background=T.BG)
         root.resizable(False, False)
 
@@ -28,18 +36,17 @@ class UnlockDialog:
         frame.pack(fill="both", expand=True)
 
         ttk.Label(frame, text="CryptoBro", font=T.FONT_TITLE).pack(pady=(0, 4))
-        ttk.Label(
-            frame,
-            text="Puedes tener varias bóvedas. Cada una con su propia clave.",
-            style="Hint.TLabel",
-        ).pack(pady=(0, 12))
+        self.ws_label = ttk.Label(frame, text="", style="Hint.TLabel")
+        self.ws_label.pack(pady=(0, 8))
 
-        ttk.Label(frame, text="Bóveda").pack(anchor="w")
-        row = ttk.Frame(frame)
-        row.pack(fill="x", pady=4)
+        RoundedButton(
+            frame, text="Elegir carpeta de trabajo…", command=self._pick_workspace
+        ).pack(fill="x", pady=3)
+
+        ttk.Label(frame, text="Bóveda").pack(anchor="w", pady=(10, 0))
         self.vault_var = tk.StringVar()
-        self.combo = ttk.Combobox(row, textvariable=self.vault_var, state="readonly")
-        self.combo.pack(side="left", fill="x", expand=True)
+        self.combo = ttk.Combobox(frame, textvariable=self.vault_var, state="readonly")
+        self.combo.pack(fill="x", pady=4)
         self.combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_mode())
 
         self.pw = tk.StringVar()
@@ -51,43 +58,60 @@ class UnlockDialog:
 
         self.actions = ttk.Frame(frame)
         self.actions.pack(fill="x", pady=6)
-
         RoundedButton(self.actions, text="Nueva bóveda", command=self._show_create).pack(
             fill="x", pady=3
         )
         RoundedButton(
-            self.actions, text="Eliminar bóveda seleccionada", command=self._delete_selected
+            self.actions, text="Eliminar bóveda (sin clave)", command=self._delete_selected
         ).pack(fill="x", pady=3)
         RoundedButton(
-            self.actions, text="Restaurar backup (.gor)", command=self._restore
+            self.actions, text="Importar bóveda (.gor)", command=self._restore
         ).pack(fill="x", pady=3)
 
         self._reload_list()
         self._refresh_mode()
+
+    def _update_ws_label(self):
+        self.ws_label.config(text=f"Carpeta de trabajo:\n{get_workspace()}")
+
+    def _pick_workspace(self):
+        path = filedialog.askdirectory(
+            title="Carpeta donde guardar bóvedas y archivos",
+            initialdir=str(get_workspace()),
+        )
+        if path:
+            set_workspace(path)
+            self._reload_list()
+            self._refresh_mode()
 
     def _clear_form(self):
         for w in self.form.winfo_children():
             w.destroy()
 
     def _reload_list(self):
+        self._update_ws_label()
         names = list_vault_names()
         self.combo["values"] = names
         if names:
             current = self.vault.name if self.vault.name in names else names[0]
             self.vault_var.set(current)
-            self.vault.select(current)
+            try:
+                self.vault.select(current)
+            except Exception:
+                pass
         else:
             self.vault_var.set("")
 
     def _refresh_mode(self):
         self._clear_form()
+        self._update_ws_label()
         names = list_vault_names()
         selected = self.vault_var.get().strip()
 
         if not names:
             ttk.Label(
                 self.form,
-                text="Primera vez — crea tu primera bóveda",
+                text="No hay bóvedas — crea una en esta carpeta",
                 font=T.FONT_SUB,
             ).pack(anchor="w", pady=(0, 8))
             self._build_create_fields(default_name="personal")
@@ -96,19 +120,11 @@ class UnlockDialog:
             ).pack(fill="x", pady=12)
             return
 
-        if selected:
-            try:
-                self.vault.select(selected)
-            except Exception:
-                pass
-
         ttk.Label(
-            self.form,
-            text=f"Desbloquear «{selected}»",
-            font=T.FONT_SUB,
+            self.form, text=f"Desbloquear «{selected}»", font=T.FONT_SUB
         ).pack(anchor="w", pady=(0, 8))
         ttk.Label(self.form, text="Clave de bloqueo").pack(anchor="w")
-        ent = ttk.Entry(self.form, textvariable=self.pw, show="*", width=40)
+        ent = ttk.Entry(self.form, textvariable=self.pw, show="*")
         ent.pack(fill="x", pady=2)
         ent.focus_set()
         ent.bind("<Return>", lambda e: self._unlock())
@@ -132,6 +148,11 @@ class UnlockDialog:
         ttk.Label(self.form, text="Nueva bóveda", font=T.FONT_SUB).pack(
             anchor="w", pady=(0, 8)
         )
+        ttk.Label(
+            self.form,
+            text=f"Se creará en:\n{get_workspace()}",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(0, 8))
         self.pw.set("")
         self.pw2.set("")
         self._build_create_fields()
@@ -187,20 +208,14 @@ class UnlockDialog:
             return
         if not messagebox.askyesno(
             "Eliminar bóveda",
-            f"¿Eliminar permanentemente la bóveda «{selected}»?\n"
-            "Se borrarán notas, claves y cápsulas de ESA bóveda.\n"
-            "Esta acción no se puede deshacer.",
+            f"¿Eliminar «{selected}»?\n"
+            "No se pide clave. Se borra el archivo .gor del disco.",
         ):
-            return
-        pw = simpledialog.askstring(
-            "Confirmar", f"Clave de bloqueo de «{selected}»:", show="*", parent=self.root
-        )
-        if not pw:
             return
         try:
             if not self.vault._locked and self.vault.name == selected:
                 self.vault.lock()
-            self.vault.delete_vault(selected, confirm_password=pw)
+            self.vault.delete_vault(selected)
             messagebox.showinfo("Listo", f"Bóveda «{selected}» eliminada.")
             self.pw.set("")
             self._reload_list()
@@ -210,7 +225,7 @@ class UnlockDialog:
 
     def _restore(self):
         path = filedialog.askopenfilename(
-            title="Restaurar bóveda",
+            title="Importar bóveda",
             filetypes=[
                 ("Bóveda CryptoBro", "*.gor"),
                 ("Backup legacy", "*.cbvault"),
@@ -219,10 +234,18 @@ class UnlockDialog:
         )
         if not path:
             return
+        # la carpeta del .gor importado pasa a ser el workspace
+        dest_dir = filedialog.askdirectory(
+            title="¿En qué carpeta dejar esta bóveda?",
+            initialdir=str(get_workspace() or binary_dir()),
+        )
+        if not dest_dir:
+            return
+        set_workspace(dest_dir)
         name = simpledialog.askstring(
             "Nombre",
-            "¿Con qué nombre guardar esta bóveda restaurada?",
-            initialvalue="restaurada",
+            "Nombre de la bóveda:",
+            initialvalue=Path_stem(path),
             parent=self.root,
         )
         if not name:
@@ -232,20 +255,16 @@ class UnlockDialog:
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             return
-        overwrite = False
+        overwrite = vault_gor_path(name).exists()
+        if overwrite and not messagebox.askyesno(
+            "Sobrescribir", f"«{name}» ya existe ahí. ¿Sobrescribir?"
+        ):
+            return
         try:
-            from domain.paths import vault_gor_path
-
-            if vault_gor_path(name).exists():
-                if not messagebox.askyesno(
-                    "Sobrescribir", f"«{name}» ya existe. ¿Sobrescribir?"
-                ):
-                    return
-                overwrite = True
             self.vault.import_backup(path, vault_name=name, overwrite=overwrite)
             messagebox.showinfo(
-                "Restaurado",
-                f"Backup en «{name}». Selecciónala y desbloquea con su clave.",
+                "Importada",
+                f"Bóveda «{name}» en:\n{get_workspace()}\n\nDesbloquéala con su clave.",
             )
             self._reload_list()
             self.vault_var.set(sanitize_vault_name(name))
@@ -254,3 +273,9 @@ class UnlockDialog:
             messagebox.showerror("Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+
+def Path_stem(path: str) -> str:
+    from pathlib import Path
+
+    return Path(path).stem

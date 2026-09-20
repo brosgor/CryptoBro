@@ -136,10 +136,10 @@ class CryptoService:
         self.vault.reset_contents(password)
         self.crypto_bro = CryptoBro(self.vault)
 
-    def delete_current_vault(self, password: str) -> None:
+    def delete_current_vault(self, password: str | None = None) -> None:
         name = self.vault.name
         self.vault.lock()
-        self.vault.delete_vault(name, confirm_password=password)
+        self.vault.delete_vault(name)
 
     def hash_bytes(self, data: bytes) -> dict:
         return {

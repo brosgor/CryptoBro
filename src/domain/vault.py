@@ -12,17 +12,18 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+from domain import paths as P
 from domain.paths import (
-    DATA,
-    DB_WORK,
-    VAULT_SESSION,
     ensure_data_dir,
     get_active_vault_name,
     list_vault_names,
-    migrate_all_legacy,
     read_gor_parts,
+    register_vault_path,
+    resolve_vault_gor,
     sanitize_vault_name,
     set_active_vault_name,
+    set_workspace,
+    unregister_vault_path,
     vault_gor_path,
     write_gor,
 )
@@ -55,11 +56,10 @@ class VaultError(Exception):
 
 
 class Vault:
-    """Bóveda = data/vaults/<nombre>.gor"""
+    """Bóveda = <workspace>/<nombre>.gor (portable)."""
 
     def __init__(self, name: str | None = None) -> None:
         ensure_data_dir()
-        migrate_all_legacy()
         if name:
             self.name = sanitize_vault_name(name)
         else:
@@ -71,7 +71,8 @@ class Vault:
 
     @property
     def gor_path(self) -> Path:
-        return vault_gor_path(self.name)
+        found = resolve_vault_gor(self.name)
+        return found if found else vault_gor_path(self.name)
 
     @property
     def is_setup(self) -> bool:
@@ -91,6 +92,10 @@ class Vault:
         if not self._locked:
             raise VaultError("Bloquea la bóveda actual antes de cambiar")
         self.name = sanitize_vault_name(name)
+        found = resolve_vault_gor(self.name)
+        if found:
+            set_workspace(found.parent)
+            register_vault_path(found)
         set_active_vault_name(self.name)
 
     def _derive(self, password: str, salt: bytes) -> bytes:
@@ -117,22 +122,22 @@ class Vault:
         path.unlink(missing_ok=True)
 
     def _write_session(self) -> None:
-        VAULT_SESSION.write_text(
+        P.VAULT_SESSION.write_text(
             json.dumps(
-                {"work": str(DB_WORK), "pid": os.getpid(), "vault": self.name}
+                {"work": str(P.DB_WORK), "pid": os.getpid(), "vault": self.name}
             ),
             encoding="utf-8",
         )
 
     def _clear_session(self) -> None:
-        VAULT_SESSION.unlink(missing_ok=True)
+        P.VAULT_SESSION.unlink(missing_ok=True)
 
     def _recover_orphan_if_any(self, fernet: Fernet) -> None:
-        if not DB_WORK.exists():
+        if not P.DB_WORK.exists():
             self._clear_session()
             return
         try:
-            enc = fernet.encrypt(DB_WORK.read_bytes())
+            enc = fernet.encrypt(P.DB_WORK.read_bytes())
             meta_text = json.dumps(self._meta_json or {})
             # si no hay meta en memoria, leer del .gor
             if self.gor_path.exists() and not self._meta_json:
@@ -142,7 +147,7 @@ class Vault:
             write_gor(self.gor_path, meta_text, enc, self.name)
         except Exception:
             pass
-        self._shred(DB_WORK)
+        self._shred(P.DB_WORK)
         self._clear_session()
 
     def _load_meta(self) -> dict:
@@ -161,12 +166,15 @@ class Vault:
         fernet = self._fernet_from_key_material(self._derive(password, salt))
         verifier = fernet.encrypt(_VERIFIER).decode("ascii")
         meta = {"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}
-        tmp = DATA / f"_init_{self.name}.db"
+        tmp = P.DATA / f"_init_{self.name}.db"
         conn = sqlite3.connect(tmp)
         conn.close()
         enc = fernet.encrypt(tmp.read_bytes())
         tmp.unlink(missing_ok=True)
-        write_gor(self.gor_path, json.dumps(meta), enc, self.name)
+        path = vault_gor_path(self.name)
+        write_gor(path, json.dumps(meta), enc, self.name)
+        register_vault_path(path)
+        set_workspace(path.parent)
         set_active_vault_name(self.name)
         self.unlock(password)
 
@@ -191,14 +199,14 @@ class Vault:
             _, enc_bytes = read_gor_parts(self.gor_path)
 
         plain = fernet.decrypt(enc_bytes)
-        DB_WORK.write_bytes(plain)
-        self._plain_path = DB_WORK
+        P.DB_WORK.write_bytes(plain)
+        self._plain_path = P.DB_WORK
         self._write_session()
         self._locked = False
         set_active_vault_name(self.name)
         self._register_shutdown_hooks()
 
-        legacy = DATA / "secure.db"
+        legacy = P.DATA / "secure.db"
         if legacy.exists() and legacy.stat().st_size > 0:
             try:
                 self._merge_legacy(legacy)
@@ -232,31 +240,22 @@ class Vault:
         self.flush()
 
     def delete_vault(self, name: str | None = None, confirm_password: str | None = None) -> None:
+        """Elimina la bóveda del disco. No requiere contraseña (portable / UX pedida)."""
         target = sanitize_vault_name(name or self.name)
         if not self._locked and target == self.name:
             raise VaultError("Bloquea la bóveda antes de eliminarla")
-        path = vault_gor_path(target)
+        path = resolve_vault_gor(target) or vault_gor_path(target)
         if not path.exists():
             raise VaultError("La bóveda no existe")
-        if confirm_password is not None:
-            meta_text, _ = read_gor_parts(path)
-            m = json.loads(meta_text)
-            salt = bytes.fromhex(m["salt"])
-            try:
-                f = self._fernet_from_key_material(self._derive(confirm_password, salt))
-                if f.decrypt(m["verifier"].encode("ascii")) != _VERIFIER:
-                    raise VaultError("Clave incorrecta")
-            except InvalidToken as e:
-                raise VaultError("Clave incorrecta") from e
+        # confirm_password ignorado a propósito (compat firma)
         self._shred(path)
+        unregister_vault_path(path)
         if get_active_vault_name() == target:
             names = list_vault_names()
             if names:
                 set_active_vault_name(names[0])
             else:
-                from domain.paths import ACTIVE_VAULT_FILE
-
-                ACTIVE_VAULT_FILE.unlink(missing_ok=True)
+                P.ACTIVE_VAULT_FILE.unlink(missing_ok=True)
 
     def reset_contents(self, password: str) -> None:
         if self._locked or not self._plain_path:
@@ -270,7 +269,7 @@ class Vault:
         except InvalidToken as e:
             raise VaultError("Clave incorrecta") from e
 
-        tmp = DATA / f"_reset_{self.name}.db"
+        tmp = P.DATA / f"_reset_{self.name}.db"
         conn = sqlite3.connect(tmp)
         conn.close()
         self._plain_path.write_bytes(tmp.read_bytes())
@@ -344,6 +343,8 @@ class Vault:
         if overwrite and dest.exists():
             dest.replace(dest.with_suffix(dest.suffix + ".bak"))
         write_gor(dest, meta_text, enc, name)
+        register_vault_path(dest)
+        set_workspace(dest.parent)
         self.select(name)
 
     def _merge_legacy(self, legacy: Path) -> None:

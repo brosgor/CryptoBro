@@ -1,34 +1,131 @@
-"""Rutas absolutas del proyecto (no dependen del CWD)."""
+"""
+Rutas portables (AppImage / .exe / desarrollo).
+
+- Por defecto: misma carpeta del binario (o raíz del repo en dev).
+- Al crear/importar una bóveda se fija el WORKSPACE (carpeta de esa bóveda).
+- Estructura del workspace:
+    <workspace>/
+      <nombre>.gor
+      data/archivos_cifrados/
+      data/archivos_descifrados/
+
+Override: CRYPTOBRO_HOME=/ruta/portable
+"""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-DATA = ROOT / "data"
-ASSETS = SRC / "assets"
-WORDS_JSON = ASSETS / "words.json"
-ICON_PNG = ASSETS / "images" / "favicon.png"
+APP_NAME = "CryptoBro"
 
-VAULTS_DIR = DATA / "vaults"
-ACTIVE_VAULT_FILE = DATA / "active_vault.txt"
-DB_WORK = DATA / "secure.db.work"
-VAULT_SESSION = DATA / "vault.session"
-
-# Contenido interno de un .gor (zip)
 GOR_META = "vault.meta"
 GOR_ENC = "secure.db.enc"
 GOR_INFO = "backup.json"
 
 
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False)) or hasattr(sys, "_MEIPASS")
+
+
+def binary_dir() -> Path:
+    """Carpeta del ejecutable (AppImage/exe) o del proyecto en desarrollo."""
+    override = os.environ.get("CRYPTOBRO_HOME", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    # desarrollo: raíz del repo
+    return Path(__file__).resolve().parents[2]
+
+
+def resource_dir() -> Path:
+    """Recursos empaquetados (icono, words)."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parents[1]
+
+
+SRC = resource_dir()
+ASSETS = SRC / "assets"
+WORDS_JSON = ASSETS / "words.json"
+ICON_PNG = ASSETS / "images" / "favicon.png"
+
+# Estado del workspace activo (junto al binario)
+_HOME = binary_dir()
+_WORKSPACE_FILE = _HOME / "cryptobro-workspace.txt"
+_REGISTRY_FILE = _HOME / "cryptobro-vaults.json"
+
+
+def get_workspace() -> Path:
+    if _WORKSPACE_FILE.exists():
+        raw = _WORKSPACE_FILE.read_text(encoding="utf-8").strip()
+        if raw:
+            p = Path(raw).expanduser()
+            if p.is_dir():
+                return p.resolve()
+    return _HOME.resolve()
+
+
+def set_workspace(path: Path) -> None:
+    path = Path(path).expanduser().resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    _WORKSPACE_FILE.write_text(str(path), encoding="utf-8")
+    ensure_workspace_layout(path)
+
+
+def ensure_workspace_layout(workspace: Path | None = None) -> Path:
+    ws = Path(workspace) if workspace else get_workspace()
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "data" / "archivos_cifrados").mkdir(parents=True, exist_ok=True)
+    (ws / "data" / "archivos_descifrados").mkdir(parents=True, exist_ok=True)
+    return ws
+
+
+def cipher_dir(workspace: Path | None = None) -> Path:
+    return ensure_workspace_layout(workspace) / "data" / "archivos_cifrados"
+
+
+def plain_dir(workspace: Path | None = None) -> Path:
+    return ensure_workspace_layout(workspace) / "data" / "archivos_descifrados"
+
+
+# Compat: DATA se actualiza en ensure_data_dir()
+def refresh_data_paths() -> None:
+    """No-op; ensure_data_dir actualiza los globals."""
+    pass
+
+
+def db_work() -> Path:
+    return ensure_workspace_layout() / "secure.db.work"
+
+
+def vault_session() -> Path:
+    return ensure_workspace_layout() / "vault.session"
+
+
+DATA = _HOME
+VAULTS_DIR = _HOME
+ACTIVE_VAULT_FILE = _HOME / "active_vault.txt"
+DB_WORK = _HOME / "secure.db.work"
+VAULT_SESSION = _HOME / "vault.session"
+
+
 def ensure_data_dir() -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    VAULTS_DIR.mkdir(parents=True, exist_ok=True)
+    """Inicializa workspace por defecto (junto al binario) y migra legado."""
+    global DATA, VAULTS_DIR, ACTIVE_VAULT_FILE, DB_WORK, VAULT_SESSION
+    ws = ensure_workspace_layout()
+    DATA = ws
+    VAULTS_DIR = ws  # los .gor viven en el workspace (raíz)
+    ACTIVE_VAULT_FILE = ws / "active_vault.txt"
+    DB_WORK = ws / "secure.db.work"
+    VAULT_SESSION = ws / "vault.session"
+    migrate_all_legacy()
 
 
 def sanitize_vault_name(name: str) -> str:
@@ -42,27 +139,83 @@ def sanitize_vault_name(name: str) -> str:
     return name.lower()
 
 
-def vault_gor_path(name: str) -> Path:
-    """Una bóveda = un archivo data/vaults/<nombre>.gor"""
-    return VAULTS_DIR / f"{sanitize_vault_name(name)}.gor"
+def vault_gor_path(name: str, workspace: Path | None = None) -> Path:
+    ws = ensure_workspace_layout(workspace)
+    return ws / f"{sanitize_vault_name(name)}.gor"
+
+
+def _load_registry() -> list[str]:
+    if not _REGISTRY_FILE.exists():
+        return []
+    try:
+        data = json.loads(_REGISTRY_FILE.read_text(encoding="utf-8"))
+        return [str(p) for p in data.get("vaults", [])]
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_registry(paths: list[str]) -> None:
+    _HOME.mkdir(parents=True, exist_ok=True)
+    uniq = []
+    for p in paths:
+        rp = str(Path(p).resolve())
+        if rp not in uniq and Path(rp).exists():
+            uniq.append(rp)
+    _REGISTRY_FILE.write_text(
+        json.dumps({"vaults": uniq}, indent=2), encoding="utf-8"
+    )
+
+
+def register_vault_path(gor_path: Path) -> None:
+    gor_path = Path(gor_path).resolve()
+    paths = _load_registry()
+    s = str(gor_path)
+    if s not in paths:
+        paths.append(s)
+    _save_registry(paths)
+    set_workspace(gor_path.parent)
+
+
+def unregister_vault_path(gor_path: Path) -> None:
+    s = str(Path(gor_path).resolve())
+    _save_registry([p for p in _load_registry() if p != s])
+
+
+def list_vault_entries() -> list[tuple[str, Path]]:
+    """[(nombre, path_al_gor), ...] del workspace actual + registro."""
+    ensure_data_dir()
+    found: dict[str, Path] = {}
+    ws = get_workspace()
+    for p in sorted(ws.glob("*.gor")):
+        if p.is_file():
+            found[p.stem] = p.resolve()
+            register_vault_path(p)
+    for raw in _load_registry():
+        p = Path(raw)
+        if p.is_file() and p.suffix.lower() == ".gor":
+            found[p.stem] = p.resolve()
+    return sorted(found.items(), key=lambda x: x[0])
 
 
 def list_vault_names() -> list[str]:
-    ensure_data_dir()
-    migrate_all_legacy()
-    if not VAULTS_DIR.exists():
-        return []
-    names = []
-    for p in sorted(VAULTS_DIR.glob("*.gor")):
-        if p.is_file():
-            names.append(p.stem)
-    return names
+    return [n for n, _ in list_vault_entries()]
+
+
+def resolve_vault_gor(name: str) -> Path | None:
+    name = sanitize_vault_name(name)
+    for n, p in list_vault_entries():
+        if n == name:
+            return p
+    # fallback: workspace actual
+    p = vault_gor_path(name)
+    return p if p.exists() else None
 
 
 def get_active_vault_name() -> str | None:
+    ensure_data_dir()
     if ACTIVE_VAULT_FILE.exists():
         n = ACTIVE_VAULT_FILE.read_text(encoding="utf-8").strip()
-        if n and vault_gor_path(n).exists():
+        if n and resolve_vault_gor(n):
             return sanitize_vault_name(n)
     names = list_vault_names()
     return names[0] if names else None
@@ -84,7 +237,7 @@ def write_gor(path: Path, meta_text: str, enc_bytes: bytes, vault_name: str = ""
             json.dumps(
                 {
                     "v": 1,
-                    "app": "CryptoBro",
+                    "app": APP_NAME,
                     "format": "gor",
                     "vault": vault_name or path.stem,
                     "created": datetime.now().isoformat(timespec="seconds"),
@@ -105,47 +258,40 @@ def read_gor_parts(path: Path) -> tuple[str, bytes]:
     return meta, enc
 
 
-def pack_dir_to_gor(dir_path: Path, dest: Path, vault_name: str) -> None:
-    meta = dir_path / "vault.meta"
-    enc = dir_path / "secure.db.enc"
-    if not meta.exists() or not enc.exists():
-        return
-    write_gor(dest, meta.read_text(encoding="utf-8"), enc.read_bytes(), vault_name)
-
-
 def migrate_all_legacy() -> None:
-    """Convierte layouts viejos (2 archivos / carpetas) a .gor."""
-    ensure_data_dir()
+    """Migra data/ del repo o layouts viejos al workspace portable."""
+    ws = ensure_workspace_layout()
 
-    # data/vault.meta + secure.db.enc → vaults/default.gor
-    legacy_meta = DATA / "vault.meta"
-    legacy_enc = DATA / "secure.db.enc"
-    default_gor = vault_gor_path("default")
-    if legacy_meta.exists() and legacy_enc.exists() and not default_gor.exists():
-        write_gor(
-            default_gor,
-            legacy_meta.read_text(encoding="utf-8"),
-            legacy_enc.read_bytes(),
-            "default",
-        )
-        legacy_meta.unlink(missing_ok=True)
-        legacy_enc.unlink(missing_ok=True)
-        set_active_vault_name("default")
+    # repo data/vaults/*.gor → workspace
+    repo_data = binary_dir() / "data"
+    if not _is_frozen():
+        repo_data = Path(__file__).resolve().parents[2] / "data"
+    old_vaults = repo_data / "vaults"
+    if old_vaults.exists():
+        for p in old_vaults.glob("*.gor"):
+            dest = ws / p.name
+            if not dest.exists():
+                shutil.copy2(p, dest)
+                register_vault_path(dest)
+        for d in old_vaults.iterdir():
+            if d.is_dir() and (d / "vault.meta").exists() and (d / "secure.db.enc").exists():
+                dest = ws / f"{d.name}.gor"
+                if not dest.exists():
+                    write_gor(
+                        dest,
+                        (d / "vault.meta").read_text(encoding="utf-8"),
+                        (d / "secure.db.enc").read_bytes(),
+                        d.name,
+                    )
+                    register_vault_path(dest)
 
-    # data/vaults/<name>/vault.meta+enc → data/vaults/<name>.gor
-    if not VAULTS_DIR.exists():
-        return
-    for d in list(VAULTS_DIR.iterdir()):
-        if not d.is_dir():
-            continue
-        gor = vault_gor_path(d.name)
-        if gor.exists():
-            shutil.rmtree(d, ignore_errors=True)
-            continue
-        meta = d / "vault.meta"
-        enc = d / "secure.db.enc"
-        if meta.exists() and enc.exists():
-            pack_dir_to_gor(d, gor, d.name)
-            shutil.rmtree(d, ignore_errors=True)
-            if not ACTIVE_VAULT_FILE.exists():
-                set_active_vault_name(d.name)
+    # dos archivos sueltos en workspace o data/
+    for base in (ws, repo_data):
+        meta = base / "vault.meta"
+        enc = base / "secure.db.enc"
+        dest = ws / "default.gor"
+        if meta.exists() and enc.exists() and not dest.exists():
+            write_gor(dest, meta.read_text(encoding="utf-8"), enc.read_bytes(), "default")
+            register_vault_path(dest)
+            meta.unlink(missing_ok=True)
+            enc.unlink(missing_ok=True)

@@ -422,10 +422,19 @@ class CryptoApp:
         frame = ttk.Frame(self.tab_keys, padding="20")
         frame.pack(fill="both", expand=True)
 
+        from domain.paths import get_workspace, cipher_dir, plain_dir
+
         ttk.Label(
             frame,
             text=f"Bóveda activa: {self.service.vault.name}",
             font=("DejaVu Sans", 11, "bold"),
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Label(
+            frame,
+            text=f"Workspace: {get_workspace()}\n"
+            f"Cifrados → {cipher_dir()}\n"
+            f"Descifrados → {plain_dir()}",
+            style="Hint.TLabel",
         ).pack(anchor="w", pady=(0, 8))
 
         columns = ("ID", "Hash", "Extension")
@@ -510,21 +519,15 @@ class CryptoApp:
             messagebox.showerror("Error", str(e))
 
     def delete_current_vault(self):
-        from tkinter import simpledialog
-
         name = self.service.vault.name
         if not messagebox.askyesno(
             "Eliminar bóveda",
-            f"¿Eliminar permanentemente «{name}» y cerrar la app?\n"
-            "Exporta un backup antes si la necesitas.",
+            f"¿Eliminar «{name}» y cerrar?\nNo se pide clave.",
         ):
             return
-        pw = simpledialog.askstring("Confirmar", "Clave de bloqueo:", show="*", parent=self.root)
-        if not pw:
-            return
         try:
-            self.service.delete_current_vault(pw)
-            messagebox.showinfo("Eliminada", f"Bóveda «{name}» eliminada. La app se cerrará.")
+            self.service.delete_current_vault()
+            messagebox.showinfo("Eliminada", f"Bóveda «{name}» eliminada.")
             self.root.destroy()
         except Exception as e:
             messagebox.showerror("Error", str(e))

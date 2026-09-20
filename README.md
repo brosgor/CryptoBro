@@ -72,6 +72,23 @@ La primera vez te pedirá **crear una bóveda** (nombre + clave de bloqueo). Pue
 En la pantalla de inicio: Nueva / Eliminar / Restaurar backup.  
 En **Claves** (bóveda abierta): Cambiar clave, Vaciar, Eliminar, Exportar `.gor`.
 
+### Dónde se guardan los datos (portable AppImage / .exe)
+
+Por defecto: **misma carpeta del binario** (o del repo en desarrollo).
+
+```
+<carpeta-del-app>/
+  CryptoBro.AppImage   (o .exe)
+  personal.gor
+  data/
+    archivos_cifrados/      ← .bros
+    archivos_descifrados/   ← al descifrar
+```
+
+Al inicio puedes **Elegir carpeta de trabajo**, crear/importar bóveda ahí, o eliminar **sin clave**.
+
+Override: `CRYPTOBRO_HOME=/ruta/usb`
+
 ### Encriptar Archivos
 La pestaña **"Encrypt File"** es el punto de partida.
 
