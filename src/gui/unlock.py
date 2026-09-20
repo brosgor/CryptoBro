@@ -228,8 +228,8 @@ class UnlockDialog:
             title="Importar bóveda",
             filetypes=[
                 ("Bóveda CryptoBro", "*.gor"),
-                ("Backup legacy", "*.cbvault"),
-                ("All", "*.*"),
+                ("Copia antigua", "*.cbvault"),
+                ("Todos", "*.*"),
             ],
         )
         if not path:

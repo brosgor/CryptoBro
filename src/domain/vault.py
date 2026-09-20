@@ -85,7 +85,7 @@ class Vault:
     @property
     def db_path(self) -> str:
         if not self._plain_path:
-            raise VaultError("Vault locked")
+            raise VaultError("Bóveda bloqueada")
         return str(self._plain_path)
 
     def select(self, name: str) -> None:
@@ -326,7 +326,7 @@ class Vault:
     ) -> None:
         src = Path(src)
         if not src.exists():
-            raise VaultError("Archivo de backup no encontrado")
+            raise VaultError("Archivo de copia no encontrado")
         if not self._locked:
             raise VaultError("Bloquea la bóveda antes de restaurar")
         name = sanitize_vault_name(vault_name)
@@ -338,7 +338,7 @@ class Vault:
         try:
             meta_text, enc = read_gor_parts(src)
         except (ValueError, zipfile.BadZipFile) as e:
-            raise VaultError("Backup inválido (se espera .gor o .cbvault)") from e
+            raise VaultError("Copia inválida (se espera .gor o .cbvault)") from e
 
         if overwrite and dest.exists():
             dest.replace(dest.with_suffix(dest.suffix + ".bak"))

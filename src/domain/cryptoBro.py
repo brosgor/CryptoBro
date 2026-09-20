@@ -71,7 +71,7 @@ class CryptoBro:
             try:
                 salt = bytes.fromhex(salt_hex)
             except ValueError as e:
-                raise ValueError("Invalid encrypted message format (missing salt)") from e
+                raise ValueError("Formato de mensaje cifrado inválido (falta el salt)") from e
             encrypted_message = encrypted_message[32:]
             key, _ = self._deriveKey(key, salt)
 

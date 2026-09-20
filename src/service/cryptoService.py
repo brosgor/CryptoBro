@@ -84,29 +84,45 @@ class CryptoService:
         years=0,
         days=0,
         hours=0,
-        minutes=0,
-        seconds=0,
+        lock_minutes=0,
+        decrypt_minutes=0,
+        decrypt_seconds=0,
         delete_original=False,
     ) -> tuple:
         """
-        Cápsula offline (TLP): la clave no queda en claro; al abrir hay que
-        resolver squarings ≈ duración de CPU. Sin reloj ni red.
+        Complementarios (offline):
+        - bloqueo = calendario hasta unlock_at (años/días/horas/min).
+        - descifrado = puzzle CPU (min/seg) al Resolver, tras vencer el bloqueo.
+        Al menos uno debe ser > 0.
         """
         from domain.timelock import seal_to_str
 
-        total = timedelta(
-            days=years * 365 + days, hours=hours, minutes=minutes, seconds=seconds
+        lock = timedelta(
+            days=years * 365 + days, hours=hours, minutes=lock_minutes
         )
-        secs = total.total_seconds()
-        if secs <= 0:
-            raise ValueError("La duración debe ser mayor que cero")
+        decrypt = timedelta(minutes=decrypt_minutes, seconds=decrypt_seconds)
+        lock_secs = lock.total_seconds()
+        decrypt_secs = decrypt.total_seconds()
+
+        if lock_secs <= 0 and decrypt_secs <= 0:
+            raise ValueError(
+                "Indica tiempo a bloquear y/o tiempo de descifrado (al menos uno)."
+            )
+        if decrypt_secs > 3600:
+            raise ValueError("Tiempo de descifrado: máximo 60 minutos de CPU")
 
         key = self.generate_key()
         extension, used_key, bros_path = self.encryptFile(file_path, key, generated=True)
-        puzzle = seal_to_str(used_key, secs)
-        unlock_at = (datetime.now() + total).isoformat(timespec="seconds")
+        unlock_at = (datetime.now() + lock).isoformat(timespec="seconds")
         name = label.strip() or os.path.basename(file_path)
-        cid = self.crypto_bro.addCapsule(name, bros_path, puzzle, unlock_at, extension)
+
+        if decrypt_secs > 0:
+            stored = seal_to_str(used_key, decrypt_secs)
+        else:
+            # solo calendario: clave en bóveda
+            stored = used_key
+
+        cid = self.crypto_bro.addCapsule(name, bros_path, stored, unlock_at, extension)
 
         if delete_original and os.path.exists(file_path):
             size = os.path.getsize(file_path)
@@ -114,13 +130,14 @@ class CryptoService:
                 f.write(os.urandom(size))
             os.remove(file_path)
 
-        return cid, unlock_at, bros_path, int(secs)
+        return cid, unlock_at, bros_path, int(lock_secs), int(decrypt_secs)
 
     def get_all_capsules(self) -> list:
         return self.crypto_bro.getAllCapsules()
 
-    def unlock_capsule(self, capsule_id: int, progress=None) -> None:
+    def unlock_capsule(self, capsule_id: int, progress=None) -> str:
         from domain.timelock import is_puzzle, open_puzzle
+        from cryptography.fernet import InvalidToken
 
         cap = self.crypto_bro.getCapsuleById(capsule_id)
         if not cap:
@@ -128,15 +145,27 @@ class CryptoService:
         if not os.path.exists(cap.bros_path):
             raise FileNotFoundError(f"No está el .bros: {cap.bros_path}")
 
-        if is_puzzle(cap.key):
-            real_key = open_puzzle(cap.key, progress=progress)
-        else:
-            unlock_at = datetime.fromisoformat(cap.unlock_at)
-            if datetime.now() < unlock_at:
-                raise ValueError("Aún no es hora (cápsula antigua por reloj local)")
-            real_key = cap.key
+        unlock_at = datetime.fromisoformat(cap.unlock_at)
+        if datetime.now() < unlock_at:
+            raise ValueError(
+                "Aún está bloqueada por calendario.\n"
+                f"Se podrá resolver/abrir desde: {cap.unlock_at}\n"
+                "(Depende del reloj del PC.)"
+            )
 
-        self.decryptFile(cap.bros_path, real_key, extension=cap.extension, generated=True)
+        try:
+            if is_puzzle(cap.key):
+                real_key = open_puzzle(cap.key, progress=progress)
+            else:
+                real_key = cap.key
+
+            return self.decryptFile(
+                cap.bros_path, real_key, extension=cap.extension, generated=True
+            )
+        except InvalidToken as e:
+            raise ValueError(
+                "No se pudo descifrar el archivo (clave o puzzle incorrectos)."
+            ) from e
 
     def delete_capsule(self, capsule_id: int) -> None:
         self.crypto_bro.deleteCapsule(capsule_id)

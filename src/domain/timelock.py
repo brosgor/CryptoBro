@@ -88,11 +88,15 @@ def open_puzzle(
     t_steps = int(data["t"])
     wrapped = data["wrap"].encode("ascii")
 
-    report_every = max(1, t_steps // 100)
+    # progreso por tiempo (no cada %): evita inundar la UI
+    last_report = 0.0
     for i in range(t_steps):
         a = pow(a, 2, n)
-        if progress and (i % report_every == 0 or i + 1 == t_steps):
-            progress(i + 1, t_steps)
+        if progress:
+            now = time.perf_counter()
+            if i + 1 == t_steps or now - last_report >= 0.15:
+                progress(i + 1, t_steps)
+                last_report = now
 
     digest = hashlib.sha256(a.to_bytes((n.bit_length() + 7) // 8, "big")).digest()
     fkey = base64.urlsafe_b64encode(digest)
