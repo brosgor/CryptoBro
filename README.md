@@ -70,7 +70,7 @@ python src/main.py
 La primera vez te pedirá **crear una bóveda** (nombre + clave de bloqueo). Puedes tener **varias bóvedas**.
 
 En la pantalla de inicio: Nueva / Eliminar / Restaurar backup.  
-En **Claves** (bóveda abierta): Cambiar clave, Vaciar, Eliminar esta bóveda, Exportar `.cbvault`.
+En **Claves** (bóveda abierta): Cambiar clave, Vaciar, Eliminar, Exportar `.gor`.
 
 ### Encriptar Archivos
 La pestaña **"Encrypt File"** es el punto de partida.

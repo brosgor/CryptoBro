@@ -532,9 +532,12 @@ class CryptoApp:
     def export_vault_backup(self):
         path = filedialog.asksaveasfilename(
             title="Exportar bóveda",
-            defaultextension=".cbvault",
-            filetypes=[("CryptoBro vault", "*.cbvault")],
-            initialfile=f"{self.service.vault.name}-backup.cbvault",
+            defaultextension=".gor",
+            filetypes=[
+                ("Bóveda CryptoBro", "*.gor"),
+                ("Backup legacy", "*.cbvault"),
+            ],
+            initialfile=f"{self.service.vault.name}.gor",
         )
         if not path:
             return
@@ -543,7 +546,7 @@ class CryptoApp:
             messagebox.showinfo(
                 "Backup listo",
                 f"Exportado a:\n{out}\n\n"
-                "Sigue cifrado: necesitas la misma master password para restaurarlo.",
+                "Un solo archivo .gor (sigue cifrado). Misma clave de bloqueo para abrirlo.",
             )
         except Exception as e:
             messagebox.showerror("Error", str(e))

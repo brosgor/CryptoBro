@@ -59,7 +59,7 @@ class UnlockDialog:
             self.actions, text="Eliminar bóveda seleccionada", command=self._delete_selected
         ).pack(fill="x", pady=3)
         RoundedButton(
-            self.actions, text="Restaurar backup (.cbvault)", command=self._restore
+            self.actions, text="Restaurar backup (.gor)", command=self._restore
         ).pack(fill="x", pady=3)
 
         self._reload_list()
@@ -211,7 +211,11 @@ class UnlockDialog:
     def _restore(self):
         path = filedialog.askopenfilename(
             title="Restaurar bóveda",
-            filetypes=[("CryptoBro vault", "*.cbvault"), ("All", "*.*")],
+            filetypes=[
+                ("Bóveda CryptoBro", "*.gor"),
+                ("Backup legacy", "*.cbvault"),
+                ("All", "*.*"),
+            ],
         )
         if not path:
             return
@@ -230,9 +234,9 @@ class UnlockDialog:
             return
         overwrite = False
         try:
-            from domain.paths import vault_meta_path
+            from domain.paths import vault_gor_path
 
-            if vault_meta_path(name).exists():
+            if vault_gor_path(name).exists():
                 if not messagebox.askyesno(
                     "Sobrescribir", f"«{name}» ya existe. ¿Sobrescribir?"
                 ):

@@ -1,4 +1,4 @@
-"""Bóveda multi-perfil: master password + BD cifrada en reposo."""
+"""Bóveda multi-perfil: un archivo .gor por bóveda (meta + db cifrada)."""
 from __future__ import annotations
 
 import atexit
@@ -7,7 +7,6 @@ import os
 import signal
 import sqlite3
 import zipfile
-from datetime import datetime
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -20,12 +19,12 @@ from domain.paths import (
     ensure_data_dir,
     get_active_vault_name,
     list_vault_names,
-    migrate_legacy_vault,
+    migrate_all_legacy,
+    read_gor_parts,
     sanitize_vault_name,
     set_active_vault_name,
-    vault_dir,
-    vault_enc_path,
-    vault_meta_path,
+    vault_gor_path,
+    write_gor,
 )
 
 _VERIFIER = b"cryptobro-vault-v1"
@@ -56,31 +55,27 @@ class VaultError(Exception):
 
 
 class Vault:
-    """Una bóveda nombrada bajo data/vaults/<nombre>/."""
+    """Bóveda = data/vaults/<nombre>.gor"""
 
     def __init__(self, name: str | None = None) -> None:
         ensure_data_dir()
-        migrate_legacy_vault()
+        migrate_all_legacy()
         if name:
             self.name = sanitize_vault_name(name)
         else:
             self.name = get_active_vault_name() or "default"
         self._fernet: Fernet | None = None
         self._plain_path: Path | None = None
+        self._meta_json: dict | None = None
         self._locked = True
-        self._password_cache: str | None = None  # solo en sesión, para change_password
 
     @property
-    def meta_path(self) -> Path:
-        return vault_meta_path(self.name)
-
-    @property
-    def enc_path(self) -> Path:
-        return vault_enc_path(self.name)
+    def gor_path(self) -> Path:
+        return vault_gor_path(self.name)
 
     @property
     def is_setup(self) -> bool:
-        return self.meta_path.exists() and self.enc_path.exists()
+        return self.gor_path.exists()
 
     @property
     def any_vault_exists(self) -> bool:
@@ -137,11 +132,22 @@ class Vault:
             self._clear_session()
             return
         try:
-            self.enc_path.write_bytes(fernet.encrypt(DB_WORK.read_bytes()))
+            enc = fernet.encrypt(DB_WORK.read_bytes())
+            meta_text = json.dumps(self._meta_json or {})
+            # si no hay meta en memoria, leer del .gor
+            if self.gor_path.exists() and not self._meta_json:
+                meta_text, _ = read_gor_parts(self.gor_path)
+            elif self._meta_json:
+                meta_text = json.dumps(self._meta_json)
+            write_gor(self.gor_path, meta_text, enc, self.name)
         except Exception:
             pass
         self._shred(DB_WORK)
         self._clear_session()
+
+    def _load_meta(self) -> dict:
+        meta_text, _ = read_gor_parts(self.gor_path)
+        return json.loads(meta_text)
 
     def setup(self, password: str, name: str | None = None) -> None:
         if name:
@@ -151,27 +157,24 @@ class Vault:
         if self.is_setup:
             raise VaultError(f"La bóveda '{self.name}' ya existe")
         ensure_data_dir()
-        vault_dir(self.name).mkdir(parents=True, exist_ok=True)
         salt = os.urandom(16)
         fernet = self._fernet_from_key_material(self._derive(password, salt))
         verifier = fernet.encrypt(_VERIFIER).decode("ascii")
-        self.meta_path.write_text(
-            json.dumps({"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}),
-            encoding="utf-8",
-        )
+        meta = {"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}
         tmp = DATA / f"_init_{self.name}.db"
         conn = sqlite3.connect(tmp)
         conn.close()
-        self._fernet = fernet
-        self._encrypt_file(tmp, self.enc_path)
+        enc = fernet.encrypt(tmp.read_bytes())
         tmp.unlink(missing_ok=True)
+        write_gor(self.gor_path, json.dumps(meta), enc, self.name)
         set_active_vault_name(self.name)
         self.unlock(password)
 
     def unlock(self, password: str) -> None:
-        if not self.meta_path.exists():
+        if not self.gor_path.exists():
             raise VaultError(f"La bóveda '{self.name}' no existe")
-        meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        meta_text, enc_bytes = read_gor_parts(self.gor_path)
+        meta = json.loads(meta_text)
         salt = bytes.fromhex(meta["salt"])
         fernet = self._fernet_from_key_material(self._derive(password, salt))
         try:
@@ -181,13 +184,13 @@ class Vault:
             raise VaultError("Clave de bloqueo incorrecta") from e
 
         self._fernet = fernet
-        self._password_cache = password
+        self._meta_json = meta
         self._recover_orphan_if_any(fernet)
+        # re-read after possible recovery
+        if self.gor_path.exists():
+            _, enc_bytes = read_gor_parts(self.gor_path)
 
-        if not self.enc_path.exists():
-            raise VaultError("Falta la base cifrada de la bóveda")
-
-        plain = fernet.decrypt(self.enc_path.read_bytes())
+        plain = fernet.decrypt(enc_bytes)
         DB_WORK.write_bytes(plain)
         self._plain_path = DB_WORK
         self._write_session()
@@ -207,8 +210,7 @@ class Vault:
             raise VaultError("Desbloquea la bóveda primero")
         if len(new_password) < 8:
             raise VaultError("La nueva clave debe tener al menos 8 caracteres")
-        # verificar old
-        meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        meta = self._meta_json or self._load_meta()
         salt_old = bytes.fromhex(meta["salt"])
         try:
             old_f = self._fernet_from_key_material(self._derive(old_password, salt_old))
@@ -220,25 +222,25 @@ class Vault:
         salt = os.urandom(16)
         new_f = self._fernet_from_key_material(self._derive(new_password, salt))
         verifier = new_f.encrypt(_VERIFIER).decode("ascii")
-        self.meta_path.write_text(
-            json.dumps({"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}),
-            encoding="utf-8",
-        )
+        self._meta_json = {
+            "v": 1,
+            "salt": salt.hex(),
+            "verifier": verifier,
+            "name": self.name,
+        }
         self._fernet = new_f
-        self._password_cache = new_password
         self.flush()
 
     def delete_vault(self, name: str | None = None, confirm_password: str | None = None) -> None:
-        """Elimina una bóveda del disco. Debe estar bloqueada si es la activa abierta."""
         target = sanitize_vault_name(name or self.name)
         if not self._locked and target == self.name:
             raise VaultError("Bloquea la bóveda antes de eliminarla")
-        meta = vault_meta_path(target)
-        enc = vault_enc_path(target)
-        if not meta.exists():
+        path = vault_gor_path(target)
+        if not path.exists():
             raise VaultError("La bóveda no existe")
         if confirm_password is not None:
-            m = json.loads(meta.read_text(encoding="utf-8"))
+            meta_text, _ = read_gor_parts(path)
+            m = json.loads(meta_text)
             salt = bytes.fromhex(m["salt"])
             try:
                 f = self._fernet_from_key_material(self._derive(confirm_password, salt))
@@ -246,15 +248,7 @@ class Vault:
                     raise VaultError("Clave incorrecta")
             except InvalidToken as e:
                 raise VaultError("Clave incorrecta") from e
-        self._shred(enc)
-        self._shred(meta)
-        d = vault_dir(target)
-        for leftover in d.glob("*"):
-            self._shred(leftover)
-        try:
-            d.rmdir()
-        except OSError:
-            pass
+        self._shred(path)
         if get_active_vault_name() == target:
             names = list_vault_names()
             if names:
@@ -265,10 +259,9 @@ class Vault:
                 ACTIVE_VAULT_FILE.unlink(missing_ok=True)
 
     def reset_contents(self, password: str) -> None:
-        """Vacía datos de la bóveda (misma clave). Caller debe reiniciar el servicio."""
         if self._locked or not self._plain_path:
             raise VaultError("Desbloquea primero")
-        meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        meta = self._meta_json or self._load_meta()
         salt = bytes.fromhex(meta["salt"])
         try:
             f = self._fernet_from_key_material(self._derive(password, salt))
@@ -299,13 +292,13 @@ class Vault:
             return
         if self._fernet and self._plain_path and self._plain_path.exists():
             try:
-                self._encrypt_file(self._plain_path, self.enc_path)
+                self.flush()
             except Exception:
                 pass
             self._shred(self._plain_path)
         self._plain_path = None
         self._fernet = None
-        self._password_cache = None
+        self._meta_json = None
         self._clear_session()
         self._locked = True
         global _ACTIVE
@@ -313,32 +306,20 @@ class Vault:
             _ACTIVE = None
 
     def flush(self) -> None:
-        if self._fernet and self._plain_path and self._plain_path.exists():
-            self._encrypt_file(self._plain_path, self.enc_path)
+        if self._fernet and self._plain_path and self._plain_path.exists() and self._meta_json:
+            enc = self._fernet.encrypt(self._plain_path.read_bytes())
+            write_gor(self.gor_path, json.dumps(self._meta_json), enc, self.name)
 
     def export_backup(self, dest: str | Path) -> Path:
         dest = Path(dest)
         if self._fernet:
             self.flush()
-        if not self.meta_path.exists() or not self.enc_path.exists():
+        if not self.gor_path.exists():
             raise VaultError("No hay bóveda para exportar")
-        if dest.suffix.lower() != ".cbvault":
-            dest = dest.with_suffix(".cbvault")
-        with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(self.meta_path, arcname="vault.meta")
-            zf.write(self.enc_path, arcname="secure.db.enc")
-            zf.writestr(
-                "backup.json",
-                json.dumps(
-                    {
-                        "v": 1,
-                        "app": "CryptoBro",
-                        "vault": self.name,
-                        "created": datetime.now().isoformat(timespec="seconds"),
-                    },
-                    indent=2,
-                ),
-            )
+        # nativo .gor; .cbvault sigue siendo el mismo zip
+        if dest.suffix.lower() not in (".gor", ".cbvault"):
+            dest = dest.with_suffix(".gor")
+        dest.write_bytes(self.gor_path.read_bytes())
         return dest
 
     def import_backup(
@@ -350,30 +331,20 @@ class Vault:
         if not self._locked:
             raise VaultError("Bloquea la bóveda antes de restaurar")
         name = sanitize_vault_name(vault_name)
-        ensure_data_dir()
-        dest_dir = vault_dir(name)
-        meta = vault_meta_path(name)
-        enc = vault_enc_path(name)
-        if (meta.exists() or enc.exists()) and not overwrite:
+        dest = vault_gor_path(name)
+        if dest.exists() and not overwrite:
             raise VaultError(f"Ya existe la bóveda '{name}'")
 
-        with zipfile.ZipFile(src, "r") as zf:
-            names = set(zf.namelist())
-            if "vault.meta" not in names or "secure.db.enc" not in names:
-                raise VaultError("Backup inválido")
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            if overwrite and meta.exists():
-                meta.replace(meta.with_suffix(".meta.bak"))
-            if overwrite and enc.exists():
-                enc.replace(enc.with_suffix(".enc.bak"))
-            zf.extract("vault.meta", path=dest_dir)
-            zf.extract("secure.db.enc", path=dest_dir)
-        self.select(name)
+        # valida que sea zip con meta+enc
+        try:
+            meta_text, enc = read_gor_parts(src)
+        except (ValueError, zipfile.BadZipFile) as e:
+            raise VaultError("Backup inválido (se espera .gor o .cbvault)") from e
 
-    def _encrypt_file(self, src: Path, dest: Path) -> None:
-        assert self._fernet
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self._fernet.encrypt(src.read_bytes()))
+        if overwrite and dest.exists():
+            dest.replace(dest.with_suffix(dest.suffix + ".bak"))
+        write_gor(dest, meta_text, enc, name)
+        self.select(name)
 
     def _merge_legacy(self, legacy: Path) -> None:
         if not self._plain_path:
@@ -404,3 +375,4 @@ class Vault:
             src.close()
             dst.close()
         legacy.rename(legacy.with_suffix(".db.bak"))
+        self.flush()
