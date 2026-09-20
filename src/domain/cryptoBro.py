@@ -1,25 +1,41 @@
 
 import base64
 import hashlib
-import datetime
-from cryptography.fernet import Fernet 
+import os
+import secrets
+import struct
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
 from repository.database import Database
 from models.secure_data import SecureData
-import os
-class CryptoBro:
-    """
-    Clase principal que maneja la lógica criptográfica y la interacción con la base de datos segura.
-    Implementa algoritmos de encriptación AES (Fernet) y derivación de claves PBKDF2HMAC.
-    """
-    def __init__(self):
-        """Inicializa la conexión con la base de datos."""
-        self.db = Database('data/secure.db')
+from domain.vault import Vault
 
-    def _deriveKey(self, key:str, salt:bytes=None):
-        """Deriva una clave Fernet de 32 bytes desde una contraseña utilizando PBKDF2HMAC."""
+# .bros v1: MAGIC + VER=1 + salt + ext_len + ext + token
+# .bros v2: MAGIC + VER=2 + salt + name_len + original_basename + token
+_BROS_MAGIC = b"BROS"
+_BROS_VER = 2
+
+
+class CryptoBro:
+    """Lógica criptográfica AES/Fernet + PBKDF2. La BD vive detrás de Vault."""
+
+    def __init__(self, vault: Vault):
+        self.vault = vault
+        self.db = Database(vault.db_path)
+        self._import_legacy_if_any()
+
+    def _import_legacy_if_any(self) -> None:
+        from domain.paths import DATA
+
+        legacy = DATA / "secure.db"
+        if legacy.exists() and legacy.stat().st_size > 0:
+            try:
+                self.vault._merge_legacy(legacy)
+            except Exception:
+                pass
+
+    def _deriveKey(self, key: str, salt: bytes = None):
         if salt is None:
             salt = os.urandom(16)
         kdf = PBKDF2HMAC(
@@ -27,184 +43,180 @@ class CryptoBro:
             length=32,
             salt=salt,
             iterations=100000,
-            backend=default_backend()
         )
         key_derived = base64.urlsafe_b64encode(kdf.derive(key.encode()))
         return key_derived.decode(), salt
-    
-    def generateHash(self, message:str)-> str:
-        """Genera un hash SHA-256 para el mensaje dado."""
-        return hashlib.sha256(message.encode()).hexdigest()
-    
-    def verifyHash(self, message:str, hash:str)-> bool:
-        """Verifica si el hash del mensaje coincide con el proporcionado."""
-        return self.generateHash(message) == hash
-    def timeNow(self)->str:
-        """Retorna la fecha y hora actual en formato string."""
-        date = datetime.datetime.now()
-        return date.strftime("%Y-%m-%d %H:%M:%S")
 
-    def generateHashByCurrentTime(self,time:str = None)-> str:
-        """Genera un hash basado en el tiempo actual."""
-        current_time = time if time is not None else self.timeNow()
-        return self.generateHash(message = current_time)
-    def generateKey(self)-> str:
-        """Genera una nueva clave Fernet aleatoria."""
+    def generateHash(self, message: str) -> str:
+        return hashlib.sha256(message.encode()).hexdigest()
+
+    def verifyHash(self, message: str, hash: str) -> bool:
+        return self.generateHash(message) == hash
+
+    def generateKey(self) -> str:
         return Fernet.generate_key().decode()
-    def encryptMessage(self, message:str, key:str,generated:bool=False)-> str:
-        """
-        Encripta un mensaje de texto.
-        
-        Args:
-            message: El mensaje a encriptar.
-            key: La clave o contraseña.
-            generated: Si True, la clave es usada directamente. Si False, se deriva usando un Salt.
-            
-        Returns:
-            El mensaje encriptado (precedido por el salt si generated=False).
-        """
+
+    def encryptMessage(self, message: str, key: str, generated: bool = False) -> str:
         salt_hex = ""
         if not generated:
             key, salt = self._deriveKey(key)
             salt_hex = salt.hex()
-        fernet =Fernet(key.encode())
+        fernet = Fernet(key.encode())
         encrypted_message = fernet.encrypt(message.encode())
         return salt_hex + encrypted_message.decode()
 
-    def decryptMessage(self, encrypted_message:str, key:str, generated:bool=False)-> str:
-        """
-        Desencripta un mensaje de texto.
-        
-        Args:
-            encrypted_message: El mensaje cifrado.
-            key: La clave o contraseña.
-            generated: Si True, se usa la clave directa. Si False, extrae el salt y deriva la clave.
-            
-        Returns:
-            El mensaje original desencriptado.
-        """
+    def decryptMessage(self, encrypted_message: str, key: str, generated: bool = False) -> str:
         if not generated:
             salt_hex = encrypted_message[:32]
             try:
                 salt = bytes.fromhex(salt_hex)
-            except ValueError:
-                # Handle lagacy or invalid format if necessary, or just fail
-                raise ValueError("Invalid encrypted message format (missing salt)")
+            except ValueError as e:
+                raise ValueError("Invalid encrypted message format (missing salt)") from e
             encrypted_message = encrypted_message[32:]
             key, _ = self._deriveKey(key, salt)
 
-        fernet =Fernet(key.encode())
+        fernet = Fernet(key.encode())
         decrypted_message = fernet.decrypt(encrypted_message.encode())
         return decrypted_message.decode()
 
-    def encryptFile(self, file_path:str, key:str,generated:bool=False)-> tuple[str, str]:
+    def encryptFile(self, file_path: str, key: str, generated: bool = False) -> tuple[str, str, str]:
+        """Cifra a <hex opaco>.bros; el nombre original va dentro (v2).
+        Returns: (extension_encrypted, key_used, bros_path)
         """
-        Encripta un archivo en disco.
-        
-        Lee el archivo, lo cifra y guarda el resultado con extensión .bros.
-        
-        Args:
-            file_path: Ruta al archivo.
-            key: Clave o contraseña.
-            generated: Si True, usa clave directa.
-            
-        Returns:
-            Tupla con (extensión_original_encriptada, clave_usada).
-        """
-        salt = b''
+        salt = b""
         if not generated:
             key, salt = self._deriveKey(key)
         else:
-             # Placeholder salt for files encrypted with raw key to maintain structure
-             salt = b'\0' * 16
+            salt = b"\0" * 16
 
         fernet = Fernet(key.encode())
-        with open(file_path, 'rb') as file:
+        with open(file_path, "rb") as file:
             original = file.read()
         encrypted = fernet.encrypt(original)
-        base, ext = os.path.splitext(file_path)
-        
-        # Use derived key to encrypt extension (generated=True)
-        # Since we use the same key, we don't need a separate salt for extension
-        extension_encrypted = self.encryptMessage(message=ext,key=key, generated=True)
-        
-        encrypted_path = base + '.bros'
-        with open(encrypted_path, 'wb') as encrypted_file:
-            encrypted_file.write(salt)
-            encrypted_file.write(encrypted)
-        return extension_encrypted, key
 
-    def decryptFile(self, file_path:str, key:str,extension:str=None,generated:bool=False)-> None:
-        """
-        Desencripta un archivo .bros.
-        
-        Restaura el archivo original con su extensión correspondiente.
-        
-        Args:
-            file_path: Ruta al archivo encriptado.
-            key: Clave o contraseña.
-            extension: Extensión original encriptada (opcional).
-            generated: Si la clave fue generada automáticmente (no contraseña manual).
-        """
-        with open(file_path, 'rb') as encrypted_file:
-            file_salt = encrypted_file.read(16)
-            encrypted = encrypted_file.read()
-            
+        original_name = os.path.basename(file_path)
+        name_bytes = original_name.encode("utf-8")
+        if len(name_bytes) > 65535:
+            raise ValueError("Nombre de archivo demasiado largo")
+
+        directory = os.path.dirname(os.path.abspath(file_path)) or "."
+        while True:
+            opaque = secrets.token_hex(16) + ".bros"
+            encrypted_path = os.path.join(directory, opaque)
+            if not os.path.exists(encrypted_path):
+                break
+
+        with open(encrypted_path, "wb") as encrypted_file:
+            encrypted_file.write(_BROS_MAGIC)
+            encrypted_file.write(bytes([_BROS_VER]))
+            encrypted_file.write(salt)
+            encrypted_file.write(struct.pack(">H", len(name_bytes)))
+            encrypted_file.write(name_bytes)
+            encrypted_file.write(encrypted)
+
+        _, ext = os.path.splitext(original_name)
+        extension_encrypted = self.encryptMessage(message=ext, key=key, generated=True)
+        return extension_encrypted, key, encrypted_path
+
+    def decryptFile(
+        self, file_path: str, key: str, extension: str = None, generated: bool = False
+    ) -> str:
+        """Descifra .bros y restaura el nombre original si es v2. Devuelve la ruta."""
+        original_name = None
+        ext_from_file = None
+
+        with open(file_path, "rb") as encrypted_file:
+            header = encrypted_file.read(5)
+            if header[:4] == _BROS_MAGIC:
+                ver = header[4]
+                file_salt = encrypted_file.read(16)
+                if ver >= 2:
+                    name_len = struct.unpack(">H", encrypted_file.read(2))[0]
+                    original_name = encrypted_file.read(name_len).decode("utf-8")
+                    encrypted = encrypted_file.read()
+                else:
+                    ext_len = struct.unpack(">H", encrypted_file.read(2))[0]
+                    ext_from_file = encrypted_file.read(ext_len).decode("utf-8")
+                    encrypted = encrypted_file.read()
+            else:
+                rest = header + encrypted_file.read()
+                file_salt = rest[:16]
+                encrypted = rest[16:]
+
         if not generated:
             key, _ = self._deriveKey(key, salt=file_salt)
-            
-        fernet =Fernet(key.encode())
-        
+
+        fernet = Fernet(key.encode())
         decrypted = fernet.decrypt(encrypted)
-        base, ext = os.path.splitext(file_path)
-        if extension is not None:
-            # Extension was encrypted with the raw derived key (generated=True)
-            extension_decrypted = self.decryptMessage(encrypted_message=extension,key=key, generated=True)
+        directory = os.path.dirname(os.path.abspath(file_path)) or "."
+
+        if original_name:
+            # evita path traversal
+            original_name = os.path.basename(original_name)
+            decrypted_path = os.path.join(directory, original_name)
         else:
-            extension_decrypted = '.gor'
-        decrypted_path = base + extension_decrypted
-        with open(decrypted_path, 'wb') as decrypted_file:
+            base, _ = os.path.splitext(file_path)
+            if extension is not None:
+                extension_decrypted = self.decryptMessage(
+                    encrypted_message=extension, key=key, generated=True
+                )
+            elif ext_from_file is not None:
+                extension_decrypted = ext_from_file
+            else:
+                extension_decrypted = ".gor"
+            decrypted_path = base + extension_decrypted
+
+        if os.path.exists(decrypted_path):
+            stem, ext = os.path.splitext(decrypted_path)
+            n = 1
+            while os.path.exists(f"{stem}_restored{n}{ext}"):
+                n += 1
+            decrypted_path = f"{stem}_restored{n}{ext}"
+
+        with open(decrypted_path, "wb") as decrypted_file:
             decrypted_file.write(decrypted)
-        
-    def generate_and_store_key(self, hash:str,key:str, extension:str,generated:bool=False)-> str:
-        """
-        Guarda la clave de desencriptación en la base de datos segura.
-        
-        Args:
-            hash: Hash de la passphrase para identificar el registro.
-            key: Clave de desencriptación.
-            extension: Extensión original encriptada.
-        """
+        return decrypted_path
+
+    def generate_and_store_key(
+        self, hash: str, key: str, extension: str, generated: bool = False
+    ) -> str:
         if not generated:
             key, _ = self._deriveKey(key)
         self.db.addItem(hash=hash, key=key, extension=extension)
-
         return key
-    def getItemByHash(self, hash:str)-> SecureData:
-        """Recupera un registro seguro dado su hash."""
-        return self.db.getItemByHash(hash)         
 
-    def delete_key_by_id(self, item_id:int)-> None: 
-        """Elimina un registro de la base de datos por su ID."""
-        self.db.deleteItemById(item_id)     
-    
-    def getAllItems(self)-> list:
-        """Obtiene todos los registros almacenados."""
+    def getItemByHash(self, hash: str) -> SecureData:
+        return self.db.getItemByHash(hash)
+
+    def delete_key_by_id(self, item_id: int) -> None:
+        self.db.deleteItemById(item_id)
+
+    def getAllItems(self) -> list:
         return self.db.getAllItems()
 
-    # Message methods
     def saveMessage(self, title: str, encrypted_message: str) -> int:
-        """Guarda un mensaje encriptado en la base de datos."""
         return self.db.addMessage(title, encrypted_message)
 
+    def updateMessage(self, msg_id: int, title: str, encrypted_message: str) -> int:
+        return self.db.updateMessage(msg_id, title, encrypted_message)
+
     def getAllMessages(self) -> list:
-        """Obtiene todos los mensajes almacenados."""
         return self.db.getAllMessages()
 
     def getMessageById(self, msg_id: int):
-        """Obtiene un mensaje específico por ID."""
         return self.db.getMessageById(msg_id)
-        
+
     def deleteMessage(self, msg_id: int):
-        """Elimina un mensaje."""
         return self.db.deleteMessage(msg_id)
+
+    def addCapsule(self, label, bros_path, key, unlock_at, extension) -> int:
+        return self.db.addCapsule(label, bros_path, key, unlock_at, extension)
+
+    def getAllCapsules(self) -> list:
+        return self.db.getAllCapsules()
+
+    def getCapsuleById(self, capsule_id: int):
+        return self.db.getCapsuleById(capsule_id)
+
+    def deleteCapsule(self, capsule_id: int) -> int:
+        return self.db.deleteCapsule(capsule_id)

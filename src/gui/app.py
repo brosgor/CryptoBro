@@ -1,133 +1,67 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox
 from service.cryptoService import CryptoService
-import uuid
+from domain.vault import Vault
+from domain.paths import ICON_PNG
+from gui.widgets import RoundedButton
+from gui import theme as T
+from gui.theme import apply_ttk_theme
 import os
 
 class CryptoApp:
     """Clase principal de la interfaz gráfica GUI basada en Tkinter."""
-    def __init__(self, root):
+    def __init__(self, root, vault: Vault):
         """Inicializa la ventana principal, dimensiones y servicio."""
         self.root = root
-        self.root.title("CryptoBro GUI")
+        self.root.title("CryptoBro")
         self.root.geometry("900x600")
-        
-        self.service = CryptoService()
-        
+        self._set_icon()
+
+        self.service = CryptoService(vault)
+
         self.apply_theme()
         self.create_widgets()
-        
-    def apply_theme(self):
-        """Aplica un tema oscuro estilo Proton VPN."""
-        style = ttk.Style()
+
+    def _set_icon(self):
         try:
-            style.theme_use('clam')
-        except:
-            pass # Fallback if clam not available
+            if ICON_PNG.exists():
+                img = tk.PhotoImage(file=str(ICON_PNG))
+                self.root.iconphoto(True, img)
+                self._icon_ref = img  # keep ref
+        except tk.TclError:
+            pass
 
-        # Colors
-        bg_color = "#1d1d20"         # Dark background
-        fg_color = "#ffffff"         # White text
-        accent_color = "#6d4aff"     # Proton Purple
-        secondary_bg = "#2e2e33"     # Slightly lighter background
-        entry_bg = "#38383d"
-        
-        self.root.configure(background=bg_color)
-
-        # General configurations
-        style.configure(".", 
-            background=bg_color, 
-            foreground=fg_color, 
-            fieldbackground=entry_bg,
-            font=("Segoe UI", 10)
-        )
-        
-        # TFrame
-        style.configure("TFrame", background=bg_color)
-        style.configure("TLabelframe", background=bg_color, foreground=fg_color)
-        style.configure("TLabelframe.Label", background=bg_color, foreground=fg_color)
-        
-        # Notebook (Tabs)
-        style.configure("TNotebook", background=bg_color, borderwidth=0)
-        style.configure("TNotebook.Tab", 
-            background=secondary_bg, 
-            foreground=fg_color, 
-            padding=[10, 5],
-            font=("Segoe UI", 10, "bold")
-        )
-        style.map("TNotebook.Tab", 
-            background=[("selected", accent_color)],
-            foreground=[("selected", fg_color)]
-        )
-
-        # Buttons
-        style.configure("TButton", 
-            background=accent_color, 
-            foreground=fg_color, 
-            borderwidth=0, 
-            focuscolor="none", # remove focus dashed line
-            padding=[10, 5]
-        )
-        style.map("TButton", 
-            background=[("active", "#5835e0"), ("pressed", "#4522cc")],
-            relief=[("pressed", "flat")]
-        )
-        
-        # Labels
-        style.configure("TLabel", background=bg_color, foreground=fg_color)
-        
-        # Entry
-        style.configure("TEntry", 
-            fieldbackground=entry_bg, 
-            foreground=fg_color,
-            insertcolor=fg_color,
-            borderwidth=0
-        )
-        
-        # Treeview
-        style.configure("Treeview", 
-            background=secondary_bg, 
-            foreground=fg_color, 
-            fieldbackground=secondary_bg,
-            borderwidth=0
-        )
-        style.configure("Treeview.Heading", 
-            background=entry_bg, 
-            foreground=fg_color, 
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0
-        )
-        style.map("Treeview", 
-            background=[("selected", accent_color)], 
-            foreground=[("selected", fg_color)]
-        )
-
-        # Checkbutton & Radiobutton
-        style.configure("TCheckbutton", background=bg_color, foreground=fg_color, focuscolor=bg_color)
-        style.configure("TRadiobutton", background=bg_color, foreground=fg_color, focuscolor=bg_color)
-        style.map("TCheckbutton", background=[("active", bg_color)])
-        style.map("TRadiobutton", background=[("active", bg_color)])
+    def apply_theme(self):
+        """Tema claro unificado."""
+        style = ttk.Style()
+        apply_ttk_theme(self.root, style)
 
     def create_widgets(self):
         """Crea y organiza las pestañas principales de la aplicación."""
-        # Tab Control
         tabControl = ttk.Notebook(self.root)
-        
+        self._notebook = tabControl
+
         self.tab_encrypt = ttk.Frame(tabControl)
         self.tab_decrypt = ttk.Frame(tabControl)
+        self.tab_capsules = ttk.Frame(tabControl)
+        self.tab_messages = ttk.Frame(tabControl)
+        self.tab_hash = ttk.Frame(tabControl)
         self.tab_keys = ttk.Frame(tabControl)
-        self.tab_messages = ttk.Frame(tabControl) # New Tab
-        
-        tabControl.add(self.tab_encrypt, text='Encrypt File')
-        tabControl.add(self.tab_decrypt, text='Decrypt File')
-        tabControl.add(self.tab_messages, text='Secure Messages')
-        tabControl.add(self.tab_keys, text='Stored Keys')
-        
+
+        tabControl.add(self.tab_encrypt, text="Cifrar")
+        tabControl.add(self.tab_decrypt, text="Descifrar")
+        tabControl.add(self.tab_capsules, text="Cápsulas")
+        tabControl.add(self.tab_messages, text="Notas")
+        tabControl.add(self.tab_hash, text="Hash")
+        tabControl.add(self.tab_keys, text="Claves")
+
         tabControl.pack(expand=1, fill="both", padx=10, pady=10)
-        
+
         self.setup_encrypt_tab()
         self.setup_decrypt_tab()
+        self.setup_capsules_tab()
         self.setup_messages_tab()
+        self.setup_hash_tab()
         self.setup_keys_tab()
 
     def setup_encrypt_tab(self):
@@ -141,7 +75,7 @@ class CryptoApp:
         self.enc_file_path = tk.StringVar()
         ttk.Label(frame, text="File to Encrypt:").grid(row=0, column=0, sticky="w", pady=5)
         ttk.Entry(frame, textvariable=self.enc_file_path).grid(row=0, column=1, sticky="ew", pady=5, padx=5)
-        ttk.Button(frame, text="Browse", command=self.browse_encrypt_file).grid(row=0, column=2, padx=5, pady=5)
+        RoundedButton(frame, text="Browse", command=self.browse_encrypt_file).grid(row=0, column=2, padx=5, pady=5)
         
         # Key
         ttk.Label(frame, text="Encryption Key:").grid(row=1, column=0, sticky="w", pady=5)
@@ -155,10 +89,10 @@ class CryptoApp:
 
         # Passphrase Info labels
         self.lbl_pass_title = ttk.Label(frame, text="Passphrase Generation:")
-        self.lbl_pass_info = ttk.Label(frame, text="A unique memorable passphrase will be generated automatically.", wraplength=400)
+        self.lbl_pass_info = ttk.Label(frame, text="A 6-word memorable passphrase will be generated automatically.", wraplength=400)
         
         # Action Button
-        self.btn_action = ttk.Button(frame, text="Encrypt", command=self.perform_encryption)
+        self.btn_action = RoundedButton(frame, text="Encrypt", command=self.perform_encryption)
         self.btn_action.grid(row=4, column=1, pady=20)
         
         self.toggle_encrypt_pass_info()
@@ -186,29 +120,57 @@ class CryptoApp:
         if not file_path or not key:
             messagebox.showerror("Error", "Please select a file and enter a key.")
             return
+        if len(key) < 8:
+            messagebox.showerror("Error", "Encryption key must be at least 8 characters.")
+            return
             
         try:
-            extension, derived_key = self.service.encryptFile(file_path, key)
-            msg = f"File encrypted successfully! Extension: {extension}"
+            extension, derived_key, bros_path = self.service.encryptFile(file_path, key)
+            msg = (
+                f"Archivo cifrado.\n"
+                f"Salida (nombre opaco): {bros_path}\n"
+                f"(El nombre original queda dentro del .bros)"
+            )
             
             if store:
                 while True:
-                    passphrase = self.service.generate_mnemonic_passphrase(3)
+                    passphrase = self.service.generate_mnemonic_passphrase(6)
                     hash_val = self.service.generate_hash(passphrase)
                     if not self.service.getItemByHash(hash_val):
                         break
                 
                 self.service.generate_and_store_key(hash=hash_val, key=derived_key, extension=extension, generated=True)
-                msg += f"\n\nKey stored securely.\nYOUR PASSPHRASE IS: {passphrase}"
+                msg += f"\n\nClave guardada en la bóveda.\nPASSPHRASE: {passphrase}"
                 
-                if messagebox.askyesno("Save Passphrase", f"Your recovery passphrase is:\n\n{passphrase}\n\nDo you want to save this to a '.par' file?"):
-                    base_path = os.path.splitext(file_path)[0]
-                    par_path = base_path + ".par"
-                    with open(par_path, 'w') as f:
+                if messagebox.askyesno(
+                    "Guardar passphrase",
+                    f"Tu passphrase de recuperación es:\n\n{passphrase}\n\n"
+                    "¿Copiar al portapapeles y guardar en un archivo .par?\n\n"
+                    "Aviso: .par es texto plano — se guardará junto al .bros opaco.",
+                ):
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(passphrase)
+                    par_path = os.path.splitext(bros_path)[0] + ".par"
+                    with open(par_path, "w") as f:
                         f.write(passphrase)
-                    msg += f"\nPassphrase saved to: {par_path}"
+                    msg += f"\nPassphrase copiada y guardada en: {par_path}"
                 else:
-                    msg += "\n(Please write down your passphrase!)"
+                    if messagebox.askyesno("Portapapeles", "¿Copiar passphrase al portapapeles?"):
+                        self.root.clipboard_clear()
+                        self.root.clipboard_append(passphrase)
+                        msg += "\nPassphrase copiada al portapapeles."
+                    else:
+                        msg += "\n(Anota tu passphrase!)"
+
+            if messagebox.askyesno("¿Borrar original?", "Cifrado listo. ¿Borrar el archivo original (plaintext)?"):
+                try:
+                    size = os.path.getsize(file_path)
+                    with open(file_path, "wb") as f:
+                        f.write(os.urandom(size))
+                    os.remove(file_path)
+                    msg += "\nOriginal file securely overwritten and deleted."
+                except OSError as e:
+                    msg += f"\nCould not delete original: {e}"
             
             messagebox.showinfo("Success", msg)
             self.refresh_keys_list()
@@ -223,7 +185,7 @@ class CryptoApp:
         self.dec_file_path = tk.StringVar()
         ttk.Label(frame, text="File to Decrypt (.bros):").grid(row=0, column=0, sticky="w", pady=5)
         ttk.Entry(frame, textvariable=self.dec_file_path).grid(row=0, column=1, sticky="ew", pady=5, padx=5)
-        ttk.Button(frame, text="Browse", command=self.browse_decrypt_file).grid(row=0, column=2, padx=5, pady=5)
+        RoundedButton(frame, text="Browse", command=self.browse_decrypt_file).grid(row=0, column=2, padx=5, pady=5)
         
         self.dec_mode = tk.StringVar(value="manual")
         ttk.Radiobutton(frame, text="Manual Key", variable=self.dec_mode, value="manual", command=self.toggle_dec_inputs).grid(row=1, column=0, sticky="w", pady=5)
@@ -238,11 +200,11 @@ class CryptoApp:
 
         self.entry_dec_pass = ttk.Entry(self.pass_frame)
         self.entry_dec_pass.pack(side="left", padx=(0, 5), fill="x", expand=True)
-        ttk.Button(self.pass_frame, text="Load .par", command=self.load_par_file).pack(side="left")
+        RoundedButton(self.pass_frame, text="Load .par", command=self.load_par_file).pack(side="left")
         
         self.toggle_dec_inputs()
         
-        ttk.Button(frame, text="Decrypt", command=self.perform_decryption).grid(row=4, column=1, pady=20)
+        RoundedButton(frame, text="Decrypt", command=self.perform_decryption).grid(row=4, column=1, pady=20)
 
     def load_par_file(self):
         filename = filedialog.askopenfilename(filetypes=[("Par Files", "*.par"), ("Text Files", "*.txt")])
@@ -310,35 +272,281 @@ class CryptoApp:
                     messagebox.showerror("Error", "Please enter the key.")
                     return
                 
-            self.service.decryptFile(file_path, key, extension=extension, generated=generated)
-            messagebox.showinfo("Success", "File decrypted successfully.")
+            out = self.service.decryptFile(file_path, key, extension=extension, generated=generated)
+            messagebox.showinfo("Listo", f"Descifrado correctamente:\n{out}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Decryption failed: {str(e)}")
 
+
+    def setup_hash_tab(self):
+        frame = ttk.Frame(self.tab_hash, padding="16")
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Calculadora de hash", font=("DejaVu Sans", 12, "bold")).grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        ttk.Label(
+            frame,
+            text="Archivo, carpeta (manifiesto recursivo) o texto. "
+            "Usa Calcular cuando quieras. MD5/SHA-1 = checksum; SHA-256 = mejor integridad.",
+            wraplength=700,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 12))
+
+        self.hash_mode = tk.StringVar(value="file")
+        modes = ttk.Frame(frame)
+        modes.grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        ttk.Radiobutton(
+            modes, text="Archivo", variable=self.hash_mode, value="file", command=self._toggle_hash_mode
+        ).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(
+            modes, text="Carpeta", variable=self.hash_mode, value="folder", command=self._toggle_hash_mode
+        ).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(
+            modes, text="Texto", variable=self.hash_mode, value="text", command=self._toggle_hash_mode
+        ).pack(side="left")
+
+        self.hash_path = tk.StringVar()
+        self.lbl_hash_path = ttk.Label(frame, text="Ruta:")
+        self.entry_hash_path = ttk.Entry(frame, textvariable=self.hash_path)
+        self.btn_hash_browse = RoundedButton(frame, text="Examinar", command=self._browse_hash_target)
+
+        self.lbl_hash_text = ttk.Label(frame, text="Texto:")
+        self.hash_text = tk.Text(
+            frame, height=6, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG, highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0
+        )
+
+        self.hash_status = tk.StringVar(value="")
+        ttk.Label(frame, textvariable=self.hash_status).grid(
+            row=4, column=0, columnspan=3, sticky="w", pady=(4, 0)
+        )
+
+        RoundedButton(frame, text="Calcular", command=self.compute_hashes).grid(
+            row=5, column=1, sticky="e", pady=10
+        )
+
+        self.hash_md5 = tk.StringVar()
+        self.hash_sha1 = tk.StringVar()
+        self.hash_sha256 = tk.StringVar()
+        for i, (lab, var) in enumerate(
+            [("MD5", self.hash_md5), ("SHA-1", self.hash_sha1), ("SHA-256", self.hash_sha256)],
+            start=6,
+        ):
+            ttk.Label(frame, text=lab + ":").grid(row=i, column=0, sticky="w", pady=4)
+            ent = ttk.Entry(frame, textvariable=var)
+            ent.grid(row=i, column=1, sticky="ew", padx=4, pady=4)
+            RoundedButton(
+                frame, text="Copiar", command=lambda v=var: self._copy_hash(v.get())
+            ).grid(row=i, column=2, padx=4)
+
+        self._toggle_hash_mode()
+
+    def _toggle_hash_mode(self):
+        mode = self.hash_mode.get()
+        if mode in ("file", "folder"):
+            self.lbl_hash_text.grid_remove()
+            self.hash_text.grid_remove()
+            self.lbl_hash_path.config(text="Archivo:" if mode == "file" else "Carpeta:")
+            self.lbl_hash_path.grid(row=3, column=0, sticky="w", pady=4)
+            self.entry_hash_path.grid(row=3, column=1, sticky="ew", padx=4, pady=4)
+            self.btn_hash_browse.grid(row=3, column=2, padx=4)
+        else:
+            self.lbl_hash_path.grid_remove()
+            self.entry_hash_path.grid_remove()
+            self.btn_hash_browse.grid_remove()
+            self.lbl_hash_text.grid(row=3, column=0, sticky="nw", pady=4)
+            self.hash_text.grid(row=3, column=1, columnspan=2, sticky="ew", padx=4, pady=4)
+
+    def _browse_hash_target(self):
+        mode = self.hash_mode.get()
+        if mode == "folder":
+            path = filedialog.askdirectory(title="Seleccionar carpeta")
+        else:
+            path = filedialog.askopenfilename(title="Seleccionar archivo")
+        if path:
+            self.hash_path.set(path)
+            # no auto-calc: el usuario pulsa Calcular (carpetas grandes pueden tardar)
+
+    def _copy_hash(self, value: str):
+        if not value:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+
+    def compute_hashes(self):
+        try:
+            mode = self.hash_mode.get()
+            self.hash_status.set("Calculando…")
+            self.root.update_idletasks()
+            if mode == "file":
+                path = self.hash_path.get().strip()
+                if not path:
+                    messagebox.showerror("Error", "Selecciona un archivo")
+                    self.hash_status.set("")
+                    return
+                if not os.path.isfile(path):
+                    messagebox.showerror("Error", f"No es un archivo:\n{path}")
+                    self.hash_status.set("")
+                    return
+                result = self.service.hash_file(path)
+                self.hash_status.set(f"Archivo: {os.path.basename(path)}")
+            elif mode == "folder":
+                path = self.hash_path.get().strip()
+                if not path:
+                    messagebox.showerror("Error", "Selecciona una carpeta")
+                    self.hash_status.set("")
+                    return
+                if not os.path.isdir(path):
+                    messagebox.showerror("Error", f"No es una carpeta:\n{path}")
+                    self.hash_status.set("")
+                    return
+                result = self.service.hash_directory(path)
+                self.hash_status.set(
+                    f"Carpeta: {result['files']} archivo(s) — hash del manifiesto ordenado"
+                )
+            else:
+                text = self.hash_text.get("1.0", tk.END)
+                if text.endswith("\n"):
+                    text = text[:-1]
+                result = self.service.hash_bytes(text.encode("utf-8"))
+                self.hash_status.set(f"Texto: {len(text.encode('utf-8'))} bytes")
+            self.hash_md5.set(result["md5"])
+            self.hash_sha1.set(result["sha1"])
+            self.hash_sha256.set(result["sha256"])
+        except Exception as e:
+            self.hash_status.set("")
+            messagebox.showerror("Error", str(e))
+
     def setup_keys_tab(self):
         frame = ttk.Frame(self.tab_keys, padding="20")
         frame.pack(fill="both", expand=True)
-        
-        columns = ('ID', 'Hash', 'Extension')
-        self.tree = ttk.Treeview(frame, columns=columns, show='headings')
-        self.tree.heading('ID', text='ID')
-        self.tree.heading('Hash', text='Passphrase Hash')
-        self.tree.heading('Extension', text='Extension')
-        
-        self.tree.column('ID', width=50)
-        self.tree.column('Hash', width=300)
-        self.tree.column('Extension', width=100)
-        
+
+        ttk.Label(
+            frame,
+            text=f"Bóveda activa: {self.service.vault.name}",
+            font=("DejaVu Sans", 11, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+
+        columns = ("ID", "Hash", "Extension")
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings")
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("Hash", text="Hash passphrase")
+        self.tree.heading("Extension", text="Extensión")
+
+        self.tree.column("ID", width=50)
+        self.tree.column("Hash", width=300)
+        self.tree.column("Extension", width=100)
+
         self.tree.pack(fill="both", expand=True)
-        
+
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=10)
-        
-        ttk.Button(btn_frame, text="Refresh", command=self.refresh_keys_list).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="Delete Selected", command=self.delete_selected_key).pack(side="left", padx=5)
-        
+
+        RoundedButton(btn_frame, text="Actualizar", command=self.refresh_keys_list).pack(
+            side="left", padx=5
+        )
+        RoundedButton(btn_frame, text="Eliminar clave", command=self.delete_selected_key).pack(
+            side="left", padx=5
+        )
+        RoundedButton(btn_frame, text="Exportar bóveda", command=self.export_vault_backup).pack(
+            side="left", padx=5
+        )
+
+        vault_btns = ttk.Frame(frame)
+        vault_btns.pack(pady=6)
+        RoundedButton(
+            vault_btns, text="Cambiar clave de bloqueo", command=self.change_lock_password
+        ).pack(side="left", padx=4)
+        RoundedButton(
+            vault_btns, text="Vaciar bóveda", command=self.reset_current_vault
+        ).pack(side="left", padx=4)
+        RoundedButton(
+            vault_btns, text="Eliminar esta bóveda", command=self.delete_current_vault
+        ).pack(side="left", padx=4)
+
         self.refresh_keys_list()
+
+    def change_lock_password(self):
+        from tkinter import simpledialog
+
+        old = simpledialog.askstring("Clave actual", "Clave de bloqueo actual:", show="*", parent=self.root)
+        if not old:
+            return
+        new = simpledialog.askstring("Nueva clave", "Nueva clave (mín. 8):", show="*", parent=self.root)
+        if not new:
+            return
+        new2 = simpledialog.askstring("Confirmar", "Repite la nueva clave:", show="*", parent=self.root)
+        if new != new2:
+            messagebox.showerror("Error", "Las claves no coinciden")
+            return
+        try:
+            self.service.change_vault_password(old, new)
+            messagebox.showinfo("Listo", "Clave de bloqueo actualizada.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def reset_current_vault(self):
+        from tkinter import simpledialog
+
+        if not messagebox.askyesno(
+            "Vaciar bóveda",
+            "¿Borrar TODO el contenido de esta bóveda (notas, claves, cápsulas)\n"
+            "manteniendo el mismo nombre y clave?\n\nNo se puede deshacer.",
+        ):
+            return
+        pw = simpledialog.askstring("Confirmar", "Clave de bloqueo:", show="*", parent=self.root)
+        if not pw:
+            return
+        try:
+            self.service.reset_vault_contents(pw)
+            self.refresh_keys_list()
+            if hasattr(self, "refresh_messages_list"):
+                self.refresh_messages_list()
+            if hasattr(self, "refresh_capsules"):
+                self.refresh_capsules()
+            messagebox.showinfo("Listo", "Bóveda vaciada.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def delete_current_vault(self):
+        from tkinter import simpledialog
+
+        name = self.service.vault.name
+        if not messagebox.askyesno(
+            "Eliminar bóveda",
+            f"¿Eliminar permanentemente «{name}» y cerrar la app?\n"
+            "Exporta un backup antes si la necesitas.",
+        ):
+            return
+        pw = simpledialog.askstring("Confirmar", "Clave de bloqueo:", show="*", parent=self.root)
+        if not pw:
+            return
+        try:
+            self.service.delete_current_vault(pw)
+            messagebox.showinfo("Eliminada", f"Bóveda «{name}» eliminada. La app se cerrará.")
+            self.root.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def export_vault_backup(self):
+        path = filedialog.asksaveasfilename(
+            title="Exportar bóveda",
+            defaultextension=".cbvault",
+            filetypes=[("CryptoBro vault", "*.cbvault")],
+            initialfile=f"{self.service.vault.name}-backup.cbvault",
+        )
+        if not path:
+            return
+        try:
+            out = self.service.export_vault_backup(path)
+            messagebox.showinfo(
+                "Backup listo",
+                f"Exportado a:\n{out}\n\n"
+                "Sigue cifrado: necesitas la misma master password para restaurarlo.",
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
     
     def delete_selected_key(self):
         selected_item = self.tree.selection()
@@ -364,6 +572,231 @@ class CryptoApp:
         for item in items:
             self.tree.insert('', 'end', values=(item.id, item.hash, item.extension))
 
+
+    # --- Cápsulas temporales (soft lock) ---
+    def setup_capsules_tab(self):
+        frame = ttk.Frame(self.tab_capsules, padding="12")
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(2, weight=1)
+
+        ttk.Label(
+            frame,
+            text="Cápsula temporal (bloqueo suave)",
+            font=("DejaVu Sans", 12, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            frame,
+            text="La app genera una clave que tú no ves. El botón Desbloquear solo aparece "
+            "cuando pasa el tiempo. No es prueba criptográfica: quien tenga la bóveda o "
+            "cambie el reloj del sistema podría adelantar el acceso.",
+            wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        body = ttk.Frame(frame)
+        body.grid(row=2, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        form = ttk.Frame(body, padding=8)
+        form.grid(row=0, column=0, sticky="nsw")
+        form.columnconfigure(1, weight=1)
+
+        ttk.Label(form, text="Archivo:").grid(row=0, column=0, sticky="w", pady=3)
+        self.cap_file = tk.StringVar()
+        ttk.Entry(form, textvariable=self.cap_file, width=28).grid(row=0, column=1, sticky="ew", padx=4)
+        RoundedButton(form, text="…", padx=10, pady=6, command=self._browse_capsule_file).grid(row=0, column=2)
+
+        ttk.Label(form, text="Etiqueta:").grid(row=1, column=0, sticky="w", pady=3)
+        self.cap_label = tk.StringVar()
+        ttk.Entry(form, textvariable=self.cap_label).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
+
+        ttk.Label(form, text="Duración:").grid(row=2, column=0, sticky="nw", pady=6)
+        dur = ttk.Frame(form)
+        dur.grid(row=2, column=1, columnspan=2, sticky="w")
+        self.cap_years = tk.StringVar(value="0")
+        self.cap_days = tk.StringVar(value="0")
+        self.cap_hours = tk.StringVar(value="0")
+        self.cap_mins = tk.StringVar(value="0")
+        self.cap_secs = tk.StringVar(value="10")
+        for i, (lab, var) in enumerate(
+            [
+                ("Años", self.cap_years),
+                ("Días", self.cap_days),
+                ("Horas", self.cap_hours),
+                ("Min", self.cap_mins),
+                ("Seg", self.cap_secs),
+            ]
+        ):
+            ttk.Label(dur, text=lab).grid(row=0, column=i)
+            ttk.Entry(dur, textvariable=var, width=5).grid(row=1, column=i, padx=2)
+
+        self.cap_del_orig = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            form, text="Borrar original tras cifrar", variable=self.cap_del_orig
+        ).grid(row=3, column=1, columnspan=2, sticky="w", pady=6)
+
+        RoundedButton(form, text="Crear cápsula", command=self.create_capsule).grid(
+            row=4, column=1, sticky="e", pady=10
+        )
+
+        right = ttk.Frame(body, padding=8)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+
+        cols = ("id", "label", "unlock", "countdown", "path")
+        self.cap_tree = ttk.Treeview(right, columns=cols, show="headings", height=12)
+        self.cap_tree.heading("id", text="ID")
+        self.cap_tree.heading("label", text="Etiqueta")
+        self.cap_tree.heading("unlock", text="Se abre")
+        self.cap_tree.heading("countdown", text="Restante")
+        self.cap_tree.heading("path", text="Archivo")
+        self.cap_tree.column("id", width=40)
+        self.cap_tree.column("label", width=120)
+        self.cap_tree.column("unlock", width=140)
+        self.cap_tree.column("countdown", width=140)
+        self.cap_tree.column("path", width=220)
+        self.cap_tree.grid(row=0, column=0, sticky="nsew")
+        self.cap_tree.bind("<<TreeviewSelect>>", self._on_capsule_select)
+
+        btns = ttk.Frame(right)
+        btns.grid(row=1, column=0, sticky="ew", pady=8)
+        self.btn_unlock_cap = RoundedButton(
+            btns, text="Desbloquear", command=self.unlock_selected_capsule, state="disabled"
+        )
+        self.btn_unlock_cap.pack(side="left", padx=4)
+        RoundedButton(btns, text="Actualizar", command=self.refresh_capsules).pack(side="left", padx=4)
+        RoundedButton(btns, text="Eliminar", command=self.delete_selected_capsule).pack(side="left", padx=4)
+
+        self._capsule_tick()
+
+    def _browse_capsule_file(self):
+        path = filedialog.askopenfilename()
+        if path:
+            self.cap_file.set(path)
+
+    def _parse_int(self, var, name):
+        try:
+            v = int(var.get().strip() or "0")
+            if v < 0:
+                raise ValueError
+            return v
+        except ValueError as e:
+            raise ValueError(f"{name} inválido") from e
+
+    def create_capsule(self):
+        path = self.cap_file.get().strip()
+        if not path:
+            messagebox.showerror("Error", "Selecciona un archivo")
+            return
+        try:
+            cid, unlock_at, bros = self.service.create_time_capsule(
+                file_path=path,
+                label=self.cap_label.get(),
+                years=self._parse_int(self.cap_years, "Años"),
+                days=self._parse_int(self.cap_days, "Días"),
+                hours=self._parse_int(self.cap_hours, "Horas"),
+                minutes=self._parse_int(self.cap_mins, "Min"),
+                seconds=self._parse_int(self.cap_secs, "Seg"),
+                delete_original=self.cap_del_orig.get(),
+            )
+            messagebox.showinfo(
+                "Cápsula creada",
+                f"ID {cid}\nSe podrá desbloquear desde:\n{unlock_at}\n\n"
+                f"Archivo: {bros}\n\n"
+                "No verás la clave. Espera el contador.",
+            )
+            self.cap_file.set("")
+            self.refresh_capsules()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _format_remaining(self, unlock_at_iso: str):
+        from datetime import datetime
+
+        unlock_at = datetime.fromisoformat(unlock_at_iso)
+        rem = unlock_at - datetime.now()
+        if rem.total_seconds() <= 0:
+            return "LISTO", True
+        total = int(rem.total_seconds())
+        years, rem_s = divmod(total, 365 * 24 * 3600)
+        days, rem_s = divmod(rem_s, 24 * 3600)
+        hours, rem_s = divmod(rem_s, 3600)
+        mins, secs = divmod(rem_s, 60)
+        parts = []
+        if years:
+            parts.append(f"{years}a")
+        if days:
+            parts.append(f"{days}d")
+        parts.append(f"{hours:02d}:{mins:02d}:{secs:02d}")
+        return " ".join(parts), False
+
+    def refresh_capsules(self):
+        if not hasattr(self, "cap_tree"):
+            return
+        for i in self.cap_tree.get_children():
+            self.cap_tree.delete(i)
+        self._capsules_cache = self.service.get_all_capsules()
+        for c in self._capsules_cache:
+            countdown, ready = self._format_remaining(c.unlock_at)
+            self.cap_tree.insert(
+                "",
+                "end",
+                iid=str(c.id),
+                values=(c.id, c.label, c.unlock_at, countdown, c.bros_path),
+                tags=("ready",) if ready else ("locked",),
+            )
+        self.cap_tree.tag_configure("ready", foreground=T.OK)
+        self.cap_tree.tag_configure("locked", foreground=T.FG_MUTED)
+        self._on_capsule_select()
+
+    def _capsule_tick(self):
+        self.refresh_capsules()
+        self.root.after(1000, self._capsule_tick)
+
+    def _on_capsule_select(self, event=None):
+        sel = self.cap_tree.selection() if hasattr(self, "cap_tree") else ()
+        if not sel:
+            self.btn_unlock_cap.config(state="disabled")
+            return
+        cid = int(sel[0])
+        cap = next((c for c in getattr(self, "_capsules_cache", []) if c.id == cid), None)
+        if not cap:
+            self.btn_unlock_cap.config(state="disabled")
+            return
+        _, ready = self._format_remaining(cap.unlock_at)
+        self.btn_unlock_cap.config(state="normal" if ready else "disabled")
+
+    def unlock_selected_capsule(self):
+        sel = self.cap_tree.selection()
+        if not sel:
+            return
+        cid = int(sel[0])
+        try:
+            self.service.unlock_capsule(cid)
+            messagebox.showinfo(
+                "Listo",
+                f"Cápsula desbloqueada.\nArchivo restaurado con su nombre original.",
+            )
+            if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
+                self.service.delete_capsule(cid)
+            self.refresh_capsules()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def delete_selected_capsule(self):
+        sel = self.cap_tree.selection()
+        if not sel:
+            return
+        if not messagebox.askyesno(
+            "Confirmar",
+            "¿Eliminar la cápsula de la bóveda?\n(El .bros en disco no se borra automáticamente.)",
+        ):
+            return
+        self.service.delete_capsule(int(sel[0]))
+        self.refresh_capsules()
+
     # --- Messaging Tab ---
     def setup_messages_tab(self):
         """Setup for the Secure Messages Tab"""
@@ -380,15 +813,15 @@ class CryptoApp:
         # -- Left Panel: Message List --
         ttk.Label(left_panel, text="Stored Messages").pack(pady=5)
         
-        self.msg_listbox = tk.Listbox(left_panel, bg="#2e2e33", fg="#ffffff", selectbackground="#6d4aff", borderwidth=0)
+        self.msg_listbox = tk.Listbox(left_panel, bg=T.SURFACE, fg=T.FG, selectbackground=T.SELECT, selectforeground=T.SELECT_FG, borderwidth=1, highlightthickness=1, highlightbackground=T.BORDER)
         self.msg_listbox.pack(fill="both", expand=True, pady=5)
         self.msg_listbox.bind('<<ListboxSelect>>', self.on_message_select)
         
         btn_frm_msgs = ttk.Frame(left_panel)
         btn_frm_msgs.pack(fill="x", pady=5)
-        ttk.Button(btn_frm_msgs, text="Refresh", command=self.refresh_messages_list).pack(fill="x", pady=2)
-        ttk.Button(btn_frm_msgs, text="Delete", command=self.delete_selected_message).pack(fill="x", pady=2)
-        ttk.Button(btn_frm_msgs, text="+ New Message", command=self.show_new_message_form).pack(fill="x", pady=(10, 2))
+        RoundedButton(btn_frm_msgs, text="Refresh", command=self.refresh_messages_list).pack(fill="x", pady=2)
+        RoundedButton(btn_frm_msgs, text="Delete", command=self.delete_selected_message).pack(fill="x", pady=2)
+        RoundedButton(btn_frm_msgs, text="+ New Message", command=self.show_new_message_form).pack(fill="x", pady=(10, 2))
 
         # -- Right Panel: forms --
         # We will use frames to switch between "New Message" and "View Message"
@@ -399,7 +832,7 @@ class CryptoApp:
         """Muestra el formulario para crear un mensaje nuevo."""
         self.clear_right_panel()
         
-        lbl = ttk.Label(self.right_container, text="Create New Secure Message", font=("Segoe UI", 12, "bold"))
+        lbl = ttk.Label(self.right_container, text="Create New Secure Message", font=("DejaVu Sans", 12, "bold"))
         lbl.pack(pady=10)
         
         form_frame = ttk.Frame(self.right_container)
@@ -411,37 +844,75 @@ class CryptoApp:
         ttk.Entry(form_frame, textvariable=self.new_msg_title).grid(row=0, column=1, sticky="ew", pady=5)
         
         ttk.Label(form_frame, text="Message:").grid(row=1, column=0, sticky="nw", pady=5)
-        self.new_msg_content = tk.Text(form_frame, height=10, bg="#38383d", fg="white", insertbackground="white", borderwidth=0)
+        self.new_msg_content = tk.Text(form_frame, height=10, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG, highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0)
         self.new_msg_content.grid(row=1, column=1, sticky="ew", pady=5)
         
         ttk.Label(form_frame, text="Encryption Password:").grid(row=2, column=0, sticky="w", pady=5)
         self.new_msg_pass = tk.StringVar()
         ttk.Entry(form_frame, textvariable=self.new_msg_pass, show="*").grid(row=2, column=1, sticky="ew", pady=5)
         
-        ttk.Button(form_frame, text="Save Encrypted Message", command=self.save_message).grid(row=3, column=1, pady=20, sticky="e")
+        RoundedButton(form_frame, text="Save Encrypted Message", command=self.save_message).grid(row=3, column=1, pady=20, sticky="e")
 
     def show_view_message_form(self, message_obj):
-        """Muestra el formulario para desencriptar y ver un mensaje."""
+        """Vista bloqueada → Unlock → editor editable (estilo vault)."""
         self.clear_right_panel()
         self.current_viewing_message = message_obj
-        
-        lbl = ttk.Label(self.right_container, text=f"View Message: {message_obj.title}", font=("Segoe UI", 12, "bold"))
-        lbl.pack(pady=10)
-        
+        self._note_unlocked = False
+        self._note_password = None
+
+        ttk.Label(
+            self.right_container,
+            text=message_obj.title,
+            font=("DejaVu Sans", 12, "bold"),
+        ).pack(pady=(10, 4))
+
         form_frame = ttk.Frame(self.right_container)
         form_frame.pack(fill="both", expand=True, padx=20)
         form_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(form_frame, text="Enter Password to Decrypt:").grid(row=0, column=0, sticky="w", pady=5)
+
+        ttk.Label(form_frame, text="Note password:").grid(row=0, column=0, sticky="w", pady=5)
         self.view_msg_pass = tk.StringVar()
         ent = ttk.Entry(form_frame, textvariable=self.view_msg_pass, show="*")
         ent.grid(row=0, column=1, sticky="ew", pady=5)
-        ent.bind('<Return>', lambda e: self.decrypt_and_show_message())
-        
-        ttk.Button(form_frame, text="Decrypt", command=self.decrypt_and_show_message).grid(row=0, column=2, padx=10)
-        
-        self.lbl_decrypted_content = tk.Text(form_frame, height=15, bg="#2e2e33", fg="#aaafff", state="disabled", borderwidth=0)
-        self.lbl_decrypted_content.grid(row=1, column=0, columnspan=3, sticky="ew", pady=20)
+        ent.bind("<Return>", lambda e: self.decrypt_and_show_message())
+        ent.focus_set()
+
+        RoundedButton(form_frame, text="Unlock", command=self.decrypt_and_show_message).grid(
+            row=0, column=2, padx=10
+        )
+
+        ttk.Label(form_frame, text="Title:").grid(row=1, column=0, sticky="w", pady=5)
+        self.edit_msg_title = tk.StringVar(value=message_obj.title)
+        self.edit_title_entry = ttk.Entry(
+            form_frame, textvariable=self.edit_msg_title, state="disabled"
+        )
+        self.edit_title_entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=5)
+
+        self.lbl_decrypted_content = tk.Text(
+            form_frame,
+            height=14,
+            bg=T.SURFACE,
+            fg=T.FG,
+            insertbackground=T.FG,
+            state="disabled",
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground=T.BORDER,
+            wrap="word",
+        )
+        self.lbl_decrypted_content.grid(row=2, column=0, columnspan=3, sticky="nsew", pady=12)
+        form_frame.rowconfigure(2, weight=1)
+
+        btn_row = ttk.Frame(form_frame)
+        btn_row.grid(row=3, column=0, columnspan=3, sticky="e", pady=8)
+        self.btn_save_note = RoundedButton(
+            btn_row, text="Save", command=self.save_edited_message, state="disabled"
+        )
+        self.btn_save_note.pack(side="left", padx=4)
+        self.btn_lock_note = RoundedButton(
+            btn_row, text="Lock", command=self.lock_note_view, state="disabled"
+        )
+        self.btn_lock_note.pack(side="left", padx=4)
 
     def clear_right_panel(self):
         for widget in self.right_container.winfo_children():
@@ -464,11 +935,14 @@ class CryptoApp:
         title = self.new_msg_title.get()
         content = self.new_msg_content.get("1.0", tk.END).strip()
         password = self.new_msg_pass.get()
-        
+
         if not title or not content or not password:
             messagebox.showerror("Error", "All fields are required")
             return
-            
+        if len(password) < 8:
+            messagebox.showerror("Error", "Password must be at least 8 characters.")
+            return
+
         try:
             self.service.save_message(title, content, password)
             messagebox.showinfo("Success", "Message encrypted and stored in database.")
@@ -484,24 +958,76 @@ class CryptoApp:
         if not password:
             messagebox.showerror("Error", "Enter the password")
             return
-            
+
         try:
-            # content is encrypted
-            encrypted_content = self.current_viewing_message.content_encrypted
-            decrypted = self.service.decrypt_message(encrypted_content, password)
-            
-            self.lbl_decrypted_content.config(state="normal")
-            self.lbl_decrypted_content.delete("1.0", tk.END)
-            self.lbl_decrypted_content.insert("1.0", decrypted)
-            self.lbl_decrypted_content.config(state="disabled")
+            decrypted = self.service.decrypt_message(
+                self.current_viewing_message.content_encrypted, password
+            )
         except Exception:
-            messagebox.showerror("Error", "Decryption failed. Wrong password OR corrupted data.")
+            messagebox.showerror(
+                "Error", "Decryption failed. Wrong password OR corrupted data."
+            )
+            return
+
+        self._note_unlocked = True
+        self._note_password = password
+
+        self.edit_title_entry.config(state="normal")
+        self.lbl_decrypted_content.config(state="normal")
+        self.lbl_decrypted_content.delete("1.0", tk.END)
+        self.lbl_decrypted_content.insert("1.0", decrypted)
+        self.btn_save_note.config(state="normal")
+        self.btn_lock_note.config(state="normal")
+
+    def save_edited_message(self):
+        if not getattr(self, "_note_unlocked", False) or not self._note_password:
+            return
+        title = self.edit_msg_title.get().strip()
+        content = self.lbl_decrypted_content.get("1.0", tk.END).rstrip("\n")
+        if not title:
+            messagebox.showerror("Error", "Title is required")
+            return
+        try:
+            self.service.update_message(
+                self.current_viewing_message.id, title, content, self._note_password
+            )
+            updated = next(
+                (
+                    m
+                    for m in self.service.get_all_messages()
+                    if m.id == self.current_viewing_message.id
+                ),
+                None,
+            )
+            if updated:
+                self.current_viewing_message = updated
+            self.refresh_messages_list()
+            messagebox.showinfo("Saved", "Note re-encrypted and saved.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def lock_note_view(self):
+        """Quita el plaintext de pantalla."""
+        if not self.current_viewing_message:
+            return
+        self._note_password = None
+        self._note_unlocked = False
+        # refresh ciphertext before re-showing locked view
+        updated = next(
+            (
+                m
+                for m in self.service.get_all_messages()
+                if m.id == self.current_viewing_message.id
+            ),
+            self.current_viewing_message,
+        )
+        self.show_view_message_form(updated)
 
     def delete_selected_message(self):
         selection = self.msg_listbox.curselection()
         if not selection:
             return
-        
+
         if messagebox.askyesno("Confirm", "Delete this message?"):
             index = selection[0]
             msg_obj = self.messages_cache[index]

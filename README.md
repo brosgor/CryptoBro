@@ -21,11 +21,13 @@ Bienvenido a la Wiki oficial de **CryptoBro**. Aquí encontrarás toda la docume
 **CryptoBro** es una aplicación de escritorio robusta diseñada para la protección de archivos mediante criptografía AES. Su filosofía es ofrecer seguridad de grado militar con una experiencia de usuario (UX) simplificada.
 
 ### Características Principales
-*   🛡️ **Encriptación Fernet (AES)**: Seguridad simétrica estándar de la industria.
-*   🗝️ **Gestión Híbrida de Claves**: Elige entre recordar tu contraseña o gestionarla automáticamente.
-*   🗣️ **Passphrases Mnemotécnicas**: Sistema inteligente que genera frases como `sol-montaña-azul` en lugar de códigos hexadecimales imposibles de recordar.
-*   📂 **Archivos .par**: Portabilidad para tus credenciales de recuperación.
-*   🖥️ **GUI Responsiva**: Interfaz moderna construida con Tkinter.
+*   **Cápsulas temporales**: cifra un archivo por X años/días/horas/min/seg; la clave no se muestra y el desbloqueo solo se habilita cuando vence el contador (bloqueo suave de UI).
+*   **Bóveda cifrada**: la base SQLite solo se abre con tu master password (Scrypt + Fernet).
+*   **Encriptación Fernet (AES)**: cifrado autenticado de archivos y mensajes.
+*   **Gestión híbrida de claves**: recuerda tu contraseña o usa passphrases de 6 palabras.
+*   **Passphrases mnemotécnicas**: frases tipo `sol-montaña-azul-...` (diccionario incluido).
+*   **Archivos .bros**: contenedor con extensión original embebida.
+*   **GUI**: interfaz Tkinter con tema monocromo e icono de marca.
 
 ---
 
@@ -62,10 +64,13 @@ Bienvenido a la Wiki oficial de **CryptoBro**. Aquí encontrarás toda la docume
 ## Guía de Usuario
 
 ### Inicio de la Aplicación
-Ejecuta el siguiente comando desde la raíz del proyecto para abrir la interfaz gráfica:
 ```bash
 python src/main.py
 ```
+La primera vez te pedirá **crear una bóveda** (nombre + clave de bloqueo). Puedes tener **varias bóvedas**.
+
+En la pantalla de inicio: Nueva / Eliminar / Restaurar backup.  
+En **Claves** (bóveda abierta): Cambiar clave, Vaciar, Eliminar esta bóveda, Exportar `.cbvault`.
 
 ### Encriptar Archivos
 La pestaña **"Encrypt File"** es el punto de partida.

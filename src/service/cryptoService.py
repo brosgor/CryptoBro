@@ -1,90 +1,199 @@
 from domain.cryptoBro import CryptoBro
+from domain.vault import Vault
 from models.secure_data import SecureData
+from domain.paths import WORDS_JSON
 import json
-import random
+import secrets
 import os
+import hashlib
+from datetime import datetime, timedelta
+
 
 class CryptoService:
-    """
-    Capa de servicio que actúa como intermediario entre la GUI y la lógica de dominio (CryptoBro).
-    Maneja la lógica de negocio adicional como la generación de passphrases mnemotécnicas.
-    """
-    def __init__(self):
-        self.crypto_bro = CryptoBro()
-    
-    def generate_mnemonic_passphrase(self, num_words: int = 3) -> str:
-        """
-        Genera una passphrase aleatoria utilizando una lista de palabras.
-        
-        Args:
-            num_words: Número de palabras en la frase.
-            
-        Returns:
-            Una cadena de palabras unidas por guiones (e.g. 'casa-perro-lago').
-        """
-        json_path = os.path.join('data', 'words.json')
+    """Intermediario GUI ↔ dominio. Requiere Vault ya desbloqueado."""
+
+    def __init__(self, vault: Vault):
+        self.vault = vault
+        self.crypto_bro = CryptoBro(vault)
+
+    def generate_mnemonic_passphrase(self, num_words: int = 6) -> str:
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(WORDS_JSON, "r", encoding="utf-8") as f:
                 words = json.load(f)
-            return "-".join(random.sample(words, num_words))
-        except Exception as e:
-            # Fallback if file not found
-            print(f"Error loading words: {e}")
-            return f"word{random.randint(100,999)}-secure-{random.randint(100,999)}"
+            return "-".join(secrets.choice(words) for _ in range(num_words))
+        except Exception:
+            return "-".join(secrets.token_hex(3) for _ in range(num_words))
 
     def generate_hash(self, message: str) -> str:
-        """Genera el hash SHA-256 de un mensaje."""
         return self.crypto_bro.generateHash(message)
-    
+
     def verify_hash(self, message: str, hash: str) -> bool:
-        """Verifica si un mensaje corresponde a un hash dado."""
         return self.crypto_bro.verifyHash(message, hash)
-    
+
     def generate_key(self) -> str:
-        """Genera una clave de encriptación segura."""
         return self.crypto_bro.generateKey()
-    
-    def encrypt_message(self, message: str, key: str,generated:bool=False) -> str:
-        """Encripta un mensaje de texto."""
+
+    def encrypt_message(self, message: str, key: str, generated: bool = False) -> str:
         return self.crypto_bro.encryptMessage(message, key, generated=generated)
-    
+
     def decrypt_message(self, encrypted_message: str, key: str) -> str:
-        """Desencripta un mensaje de texto."""
-        return self.crypto_bro.decryptMessage(encrypted_message, key)   
-    
-    def encryptFile(self, file_path: str, key: str,generated:bool=False) -> tuple[str, str]:
-        """Encripta un archivo físico."""
+        return self.crypto_bro.decryptMessage(encrypted_message, key)
+
+    def encryptFile(self, file_path: str, key: str, generated: bool = False) -> tuple[str, str, str]:
         return self.crypto_bro.encryptFile(file_path, key, generated=generated)
-    
-    def decryptFile(self, file_path: str, key: str,extension:str,generated:bool=False) -> None:
-        """Desencripta un archivo físico."""
-        self.crypto_bro.decryptFile(file_path, key,extension=extension, generated=generated)
-    
-    def generate_and_store_key(self, hash: str,key:str, extension: str, generated:bool = False) -> str:
-        """Genera y almacena una clave en la base de datos segura."""
-        return self.crypto_bro.generate_and_store_key(hash,key, extension, generated=generated)
-    
+
+    def decryptFile(
+        self, file_path: str, key: str, extension: str, generated: bool = False
+    ) -> str:
+        return self.crypto_bro.decryptFile(
+            file_path, key, extension=extension, generated=generated
+        )
+
+    def generate_and_store_key(
+        self, hash: str, key: str, extension: str, generated: bool = False
+    ) -> str:
+        return self.crypto_bro.generate_and_store_key(hash, key, extension, generated=generated)
+
     def getItemByHash(self, hash: str) -> SecureData:
-        """Obtiene un registro por su hash."""
-        return self.crypto_bro.getItemByHash(hash)         
-    
-    def delete_key_by_id(self, item_id: int) -> None: 
-        """Elimina una clave por su ID."""
-        self.crypto_bro.delete_key_by_id(item_id)     
-    
+        return self.crypto_bro.getItemByHash(hash)
+
+    def delete_key_by_id(self, item_id: int) -> None:
+        self.crypto_bro.delete_key_by_id(item_id)
+
     def getAllItems(self) -> list:
-        """Obtiene todas las claves almacenadas."""
         return self.crypto_bro.getAllItems()
 
     def save_message(self, title: str, message: str, key: str) -> None:
-        """Encripta y guarda un mensaje."""
         encrypted = self.encrypt_message(message, key)
         self.crypto_bro.saveMessage(title, encrypted)
-        
+
+    def update_message(self, msg_id: int, title: str, message: str, key: str) -> None:
+        encrypted = self.encrypt_message(message, key)
+        self.crypto_bro.updateMessage(msg_id, title, encrypted)
+
     def get_all_messages(self) -> list:
-        """Obtiene todos los mensajes."""
         return self.crypto_bro.getAllMessages()
-        
+
     def delete_message(self, msg_id: int) -> None:
-        """Elimina un mensaje."""
         self.crypto_bro.deleteMessage(msg_id)
+
+    def create_time_capsule(
+        self,
+        file_path: str,
+        label: str,
+        years=0,
+        days=0,
+        hours=0,
+        minutes=0,
+        seconds=0,
+        delete_original=False,
+    ) -> tuple:
+        """Soft time-lock: clave aleatoria; unlock_at en bóveda. No es hard-crypto."""
+        total = timedelta(
+            days=years * 365 + days, hours=hours, minutes=minutes, seconds=seconds
+        )
+        if total.total_seconds() <= 0:
+            raise ValueError("La duración debe ser mayor que cero")
+
+        key = self.generate_key()
+        extension, used_key, bros_path = self.encryptFile(file_path, key, generated=True)
+        unlock_at = (datetime.now() + total).isoformat(timespec="seconds")
+        name = label.strip() or os.path.basename(file_path)
+        cid = self.crypto_bro.addCapsule(name, bros_path, used_key, unlock_at, extension)
+
+        if delete_original and os.path.exists(file_path):
+            size = os.path.getsize(file_path)
+            with open(file_path, "wb") as f:
+                f.write(os.urandom(size))
+            os.remove(file_path)
+
+        return cid, unlock_at, bros_path
+
+    def get_all_capsules(self) -> list:
+        return self.crypto_bro.getAllCapsules()
+
+    def unlock_capsule(self, capsule_id: int) -> None:
+        cap = self.crypto_bro.getCapsuleById(capsule_id)
+        if not cap:
+            raise ValueError("Cápsula no encontrada")
+        unlock_at = datetime.fromisoformat(cap.unlock_at)
+        if datetime.now() < unlock_at:
+            raise ValueError("Aún no es hora de desbloquear")
+        if not os.path.exists(cap.bros_path):
+            raise FileNotFoundError(f"No está el .bros: {cap.bros_path}")
+        self.decryptFile(cap.bros_path, cap.key, extension=cap.extension, generated=True)
+
+    def delete_capsule(self, capsule_id: int) -> None:
+        self.crypto_bro.deleteCapsule(capsule_id)
+
+    def export_vault_backup(self, dest: str):
+        return self.vault.export_backup(dest)
+
+    def change_vault_password(self, old: str, new: str) -> None:
+        self.vault.change_password(old, new)
+
+    def reset_vault_contents(self, password: str) -> None:
+        self.vault.reset_contents(password)
+        self.crypto_bro = CryptoBro(self.vault)
+
+    def delete_current_vault(self, password: str) -> None:
+        name = self.vault.name
+        self.vault.lock()
+        self.vault.delete_vault(name, confirm_password=password)
+
+    def hash_bytes(self, data: bytes) -> dict:
+        return {
+            "md5": hashlib.md5(data).hexdigest(),
+            "sha1": hashlib.sha1(data).hexdigest(),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+
+    def hash_file(self, path: str, chunk: int = 1024 * 1024) -> dict:
+        md5 = hashlib.md5()
+        sha1 = hashlib.sha1()
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            while True:
+                block = f.read(chunk)
+                if not block:
+                    break
+                md5.update(block)
+                sha1.update(block)
+                sha256.update(block)
+        return {
+            "md5": md5.hexdigest(),
+            "sha1": sha1.hexdigest(),
+            "sha256": sha256.hexdigest(),
+        }
+
+    def hash_directory(self, dir_path: str) -> dict:
+        """
+        Hash de carpeta: concatena 'relpath\\0sha256\\n' ordenado y hashea ese manifiesto.
+        Así el digest refleja contenido + estructura (no solo un archivo suelto).
+        """
+        root = os.path.abspath(dir_path)
+        if not os.path.isdir(root):
+            raise ValueError("No es una carpeta")
+
+        lines = []
+        file_count = 0
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for name in sorted(filenames):
+                full = os.path.join(dirpath, name)
+                if not os.path.isfile(full):
+                    continue
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                digest = self.hash_file(full)["sha256"]
+                lines.append(f"{rel}\0{digest}\n")
+                file_count += 1
+
+        if file_count == 0:
+            raise ValueError("La carpeta no tiene archivos")
+
+        manifest = "".join(sorted(lines)).encode("utf-8")
+        result = self.hash_bytes(manifest)
+        result["files"] = file_count
+        return result
+
+    def lock(self) -> None:
+        self.vault.lock()
