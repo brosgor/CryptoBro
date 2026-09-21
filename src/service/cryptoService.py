@@ -43,11 +43,25 @@ class CryptoService:
         return self.crypto_bro.encryptFile(file_path, key, generated=generated)
 
     def decryptFile(
-        self, file_path: str, key: str, extension: str, generated: bool = False
+        self, file_path: str, key: str, extension: str | None = None, generated: bool = False,
+        wipe_cipher: bool = True,
     ) -> str:
-        return self.crypto_bro.decryptFile(
+        out = self.crypto_bro.decryptFile(
             file_path, key, extension=extension, generated=generated
         )
+        # wipe_cipher=False en cápsulas: el .bros es bodega persistente
+        if (
+            wipe_cipher
+            and os.path.abspath(file_path) != os.path.abspath(out)
+            and os.path.exists(file_path)
+        ):
+            from domain.cryptoBro import _shred_file
+
+            try:
+                _shred_file(file_path)
+            except OSError:
+                pass
+        return out
 
     def generate_and_store_key(
         self, hash: str, key: str, extension: str, generated: bool = False
@@ -133,10 +147,9 @@ class CryptoService:
         cid = self.crypto_bro.addCapsule(name, bros_path, stored, unlock_at, extension)
 
         if delete_original and os.path.exists(file_path):
-            size = os.path.getsize(file_path)
-            with open(file_path, "wb") as f:
-                f.write(os.urandom(size))
-            os.remove(file_path)
+            from domain.cryptoBro import _shred_file
+
+            _shred_file(file_path)
 
         return cid, unlock_at, bros_path, int(lock_secs), int(decrypt_secs), use_pw
 
@@ -193,7 +206,11 @@ class CryptoService:
                 real_key = secret
 
             return self.decryptFile(
-                cap.bros_path, real_key, extension=cap.extension, generated=True
+                cap.bros_path,
+                real_key,
+                extension=cap.extension,
+                generated=True,
+                wipe_cipher=False,  # bodega: el .bros permanece
             )
         except InvalidToken as e:
             raise ValueError(
@@ -206,8 +223,16 @@ class CryptoService:
         secret = self.release_capsule_secret(capsule_id, progress=progress)
         return self.open_capsule_with_secret(capsule_id, secret, password=password)
 
-    def delete_capsule(self, capsule_id: int) -> None:
+    def delete_capsule(self, capsule_id: int, wipe_bros: bool = False) -> None:
+        cap = self.crypto_bro.getCapsuleById(capsule_id)
         self.crypto_bro.deleteCapsule(capsule_id)
+        if wipe_bros and cap and cap.bros_path and os.path.exists(cap.bros_path):
+            from domain.cryptoBro import _shred_file
+
+            try:
+                _shred_file(cap.bros_path)
+            except OSError:
+                pass
 
     def export_vault_backup(self, dest: str):
         return self.vault.export_backup(dest)

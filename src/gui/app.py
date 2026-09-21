@@ -231,10 +231,9 @@ class CryptoApp:
 
             if messagebox.askyesno("¿Borrar original?", "Cifrado listo. ¿Borrar el archivo original (sin cifrar)?"):
                 try:
-                    size = os.path.getsize(file_path)
-                    with open(file_path, "wb") as f:
-                        f.write(os.urandom(size))
-                    os.remove(file_path)
+                    from domain.cryptoBro import _shred_file
+
+                    _shred_file(file_path)
                     msg += "\nArchivo original sobrescrito y eliminado."
                 except OSError as e:
                     msg += f"\nNo se pudo borrar el original: {e}"
@@ -353,7 +352,10 @@ class CryptoApp:
                     return
                 
             out = self.service.decryptFile(file_path, key, extension=extension, generated=generated)
-            messagebox.showinfo("Listo", f"Descifrado correctamente:\n{out}")
+            messagebox.showinfo(
+                "Listo",
+                f"Descifrado correctamente:\n{out}\n\nEl archivo cifrado (.bros) se eliminó.",
+            )
             
         except Exception as e:
             messagebox.showerror("Error", f"Falló el descifrado: {str(e)}")
@@ -1413,9 +1415,11 @@ class CryptoApp:
                 return
         try:
             out = self.service.open_capsule_with_secret(cid, secret, password=password)
-            messagebox.showinfo("Listo", f"Cápsula desbloqueada.\nArchivo:\n{out}")
-            if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
-                self.service.delete_capsule(cid)
+            messagebox.showinfo(
+                "Listo",
+                f"Cápsula desbloqueada.\nArchivo:\n{out}\n\n"
+                "El .bros permanece (bodega). Usa Eliminar si quieres quitarlo de la lista.",
+            )
             self.refresh_capsules()
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -1465,7 +1469,13 @@ class CryptoApp:
             err = None
             secret = None
             try:
-                secret = self.service.release_capsule_secret(cid, progress=on_progress)
+                # No tocar SQLite desde el worker: cap ya viene del cache del hilo GUI
+                if is_puzzle(cap.key):
+                    from domain.timelock import open_puzzle
+
+                    secret = open_puzzle(cap.key, progress=on_progress)
+                else:
+                    secret = cap.key
             except Exception as e:
                 err = e
             q.put(("done", err, secret))
@@ -1511,12 +1521,21 @@ class CryptoApp:
         sel = self.cap_tree.selection()
         if not sel:
             return
+        cid = int(sel[0])
+        cap = next((c for c in getattr(self, "_capsules_cache", []) if c.id == cid), None)
         if not messagebox.askyesno(
             "Confirmar",
-            "¿Eliminar la cápsula de la bóveda?\n(El .bros en disco no se borra automáticamente.)",
+            "¿Eliminar la cápsula de la lista?",
         ):
             return
-        self.service.delete_capsule(int(sel[0]))
+        wipe = False
+        if cap and cap.bros_path and os.path.exists(cap.bros_path):
+            wipe = messagebox.askyesno(
+                "Archivo cifrado",
+                f"¿Borrar también el archivo cifrado?\n{cap.bros_path}\n\n"
+                "Si no lo borras, el .bros queda en disco aunque ya no esté en la lista.",
+            )
+        self.service.delete_capsule(cid, wipe_bros=wipe)
         self.refresh_capsules()
 
     # --- Messaging Tab ---

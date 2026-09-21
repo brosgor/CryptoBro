@@ -1,5 +1,6 @@
 # database.py
 import sqlite3
+import threading
 from contextlib import contextmanager
 from models.secure_data import SecureData
 from models.secure_message import SecureMessage
@@ -9,10 +10,11 @@ from models.secure_capsule import SecureCapsule
 class Database:
     """Operaciones SQLite. Con bóveda abierta reutiliza la conexión :memory: del Vault."""
 
-    def __init__(self, db_name="app.db", on_write=None, conn=None):
+    def __init__(self, db_name="app.db", on_write=None, conn=None, lock=None):
         self.db_name = db_name
         self.on_write = on_write
         self._conn = conn  # conexión anclada (no cerrar)
+        self._lock = lock if lock is not None else threading.RLock()
         self.init_db()
 
     def init_db(self):
@@ -58,14 +60,15 @@ class Database:
 
     @contextmanager
     def getConnection(self):
-        if self._conn is not None:
-            yield self._conn
-            return
-        conn = sqlite3.connect(self.db_name)
-        try:
-            yield conn
-        finally:
-            conn.close()
+        with self._lock:
+            if self._conn is not None:
+                yield self._conn
+                return
+            conn = sqlite3.connect(self.db_name, check_same_thread=False)
+            try:
+                yield conn
+            finally:
+                conn.close()
 
     def addItem(self, hash, key, extension):
         with self.getConnection() as conn:

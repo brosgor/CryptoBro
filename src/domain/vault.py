@@ -7,6 +7,7 @@ import os
 import signal
 import sqlite3
 import tempfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -69,6 +70,8 @@ class Vault:
         self._conn: sqlite3.Connection | None = None
         self._meta_json: dict | None = None
         self._locked = True
+        # GUI worker threads (Resolver/hash) may touch the same :memory: conn
+        self._db_lock = threading.RLock()
 
     @property
     def gor_path(self) -> Path:
@@ -172,7 +175,8 @@ class Vault:
 
     def _open_mem(self, plain: bytes) -> None:
         """Carga bytes SQLite en :memory: vía backup (portable; sin dejar work file)."""
-        self._conn = sqlite3.connect(":memory:")
+        # check_same_thread=False: workers del GUI (Resolver) pueden leer metadatos
+        self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         fd, path = tempfile.mkstemp(suffix=".db")
         try:
             os.write(fd, plain)
@@ -183,20 +187,6 @@ class Vault:
             disk = sqlite3.connect(p)
             disk.backup(self._conn)
             disk.close()
-        finally:
-            self._shred(p)
-
-    def _dump_mem(self) -> bytes:
-        if not self._conn:
-            raise VaultError("Bóveda bloqueada")
-        fd, path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        p = Path(path)
-        try:
-            disk = sqlite3.connect(p)
-            self._conn.backup(disk)
-            disk.close()
-            return p.read_bytes()
         finally:
             self._shred(p)
 
@@ -370,9 +360,29 @@ class Vault:
             _ACTIVE = None
 
     def flush(self) -> None:
-        if self._fernet and self._conn and self._meta_json:
-            enc = self._fernet.encrypt(self._dump_mem())
-            write_gor(self.gor_path, json.dumps(self._meta_json), enc, self.name)
+        with self._db_lock:
+            if self._fernet and self._conn and self._meta_json:
+                enc = self._fernet.encrypt(self._dump_mem_unlocked())
+                write_gor(self.gor_path, json.dumps(self._meta_json), enc, self.name)
+
+    def _dump_mem_unlocked(self) -> bytes:
+        """Caller must hold _db_lock."""
+        if not self._conn:
+            raise VaultError("Bóveda bloqueada")
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        p = Path(path)
+        try:
+            disk = sqlite3.connect(p)
+            self._conn.backup(disk)
+            disk.close()
+            return p.read_bytes()
+        finally:
+            self._shred(p)
+
+    def _dump_mem(self) -> bytes:
+        with self._db_lock:
+            return self._dump_mem_unlocked()
 
     def export_backup(self, dest: str | Path) -> Path:
         dest = Path(dest)
