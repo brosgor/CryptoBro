@@ -7,10 +7,12 @@ from models.secure_capsule import SecureCapsule
 
 
 class Database:
-    """Operaciones SQLite. La ruta apunta a un archivo temporal descifrado por Vault."""
+    """Operaciones SQLite. Con bóveda abierta reutiliza la conexión :memory: del Vault."""
 
-    def __init__(self, db_name="app.db"):
+    def __init__(self, db_name="app.db", on_write=None, conn=None):
         self.db_name = db_name
+        self.on_write = on_write
+        self._conn = conn  # conexión anclada (no cerrar)
         self.init_db()
 
     def init_db(self):
@@ -47,10 +49,18 @@ class Database:
                 )
                 """
             )
-            conn.commit()
+            self._commit(conn)
+
+    def _commit(self, conn, *, persist=True):
+        conn.commit()
+        if persist and self.on_write:
+            self.on_write()
 
     @contextmanager
     def getConnection(self):
+        if self._conn is not None:
+            yield self._conn
+            return
         conn = sqlite3.connect(self.db_name)
         try:
             yield conn
@@ -64,7 +74,7 @@ class Database:
                 "INSERT INTO data (hash, key, extension) VALUES (?, ?, ?)",
                 (hash, key, extension),
             )
-            conn.commit()
+            self._commit(conn)
             return cursor.lastrowid
 
     def getItemByHash(self, hash):
@@ -78,7 +88,7 @@ class Database:
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM data WHERE id = ?", (item_id,))
-            conn.commit()
+            self._commit(conn)
             return cursor.rowcount
 
     def updateItemKey(self, item_id, new_key):
@@ -87,7 +97,7 @@ class Database:
             cursor.execute(
                 "UPDATE data SET key = ? WHERE id = ?", (new_key, item_id)
             )
-            conn.commit()
+            self._commit(conn)
             return cursor.rowcount
 
     def getAllItems(self):
@@ -103,7 +113,7 @@ class Database:
                 "INSERT INTO messages (title, content_encrypted) VALUES (?, ?)",
                 (title, content_encrypted),
             )
-            conn.commit()
+            self._commit(conn)
             return cursor.lastrowid
 
     def getAllMessages(self):
@@ -126,14 +136,14 @@ class Database:
                 "UPDATE messages SET title = ?, content_encrypted = ? WHERE id = ?",
                 (title, content_encrypted, msg_id),
             )
-            conn.commit()
+            self._commit(conn)
             return cursor.rowcount
 
     def deleteMessage(self, msg_id):
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
-            conn.commit()
+            self._commit(conn)
             return cursor.rowcount
 
     def addCapsule(self, label, bros_path, key, unlock_at, extension):
@@ -146,7 +156,7 @@ class Database:
                 """,
                 (label, bros_path, key, unlock_at, extension),
             )
-            conn.commit()
+            self._commit(conn)
             return cursor.lastrowid
 
     def getAllCapsules(self):
@@ -166,5 +176,5 @@ class Database:
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM capsules WHERE id = ?", (capsule_id,))
-            conn.commit()
+            self._commit(conn)
             return cursor.rowcount

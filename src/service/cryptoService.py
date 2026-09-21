@@ -317,5 +317,9 @@ class CryptoService:
             "kind": "passphrase",
         }
 
+    def save_vault_now(self) -> None:
+        """Persiste la BD en memoria al .gor de inmediato."""
+        self.vault.flush()
+
     def lock(self) -> None:
         self.vault.lock()

@@ -624,6 +624,9 @@ class CryptoApp:
         RoundedButton(btn_frame, text="Exportar bóveda", command=self.export_vault_backup).pack(
             side="left", padx=5
         )
+        RoundedButton(btn_frame, text="Guardar ahora", command=self.save_vault_now).pack(
+            side="left", padx=5
+        )
 
         vault_btns = ttk.Frame(frame)
         vault_btns.pack(pady=6)
@@ -647,6 +650,13 @@ class CryptoApp:
         ).pack(side="left", padx=4)
 
         self.refresh_keys_list()
+
+    def save_vault_now(self):
+        try:
+            self.service.save_vault_now()
+            messagebox.showinfo("Guardado", "Bóveda guardada en disco.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     def lock_vault(self):
         """Cierra la sesión y vuelve al selector de bóvedas."""

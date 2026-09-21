@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import sqlite3
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -56,7 +57,7 @@ class VaultError(Exception):
 
 
 class Vault:
-    """Bóveda = <workspace>/<nombre>.gor (portable)."""
+    """Bóveda = <workspace>/<nombre>.gor (portable). DB en RAM mientras está abierta."""
 
     def __init__(self, name: str | None = None) -> None:
         ensure_data_dir()
@@ -65,7 +66,7 @@ class Vault:
         else:
             self.name = get_active_vault_name() or "default"
         self._fernet: Fernet | None = None
-        self._plain_path: Path | None = None
+        self._conn: sqlite3.Connection | None = None
         self._meta_json: dict | None = None
         self._locked = True
 
@@ -84,9 +85,16 @@ class Vault:
 
     @property
     def db_path(self) -> str:
-        if not self._plain_path:
+        """Compat. Preferir db_conn: la BD vive en una conexión :memory: anclada."""
+        if self._locked or not self._conn:
             raise VaultError("Bóveda bloqueada")
-        return str(self._plain_path)
+        return ":memory:"
+
+    @property
+    def db_conn(self) -> sqlite3.Connection:
+        if self._locked or not self._conn:
+            raise VaultError("Bóveda bloqueada")
+        return self._conn
 
     def select(self, name: str) -> None:
         if not self._locked:
@@ -123,9 +131,7 @@ class Vault:
 
     def _write_session(self) -> None:
         P.VAULT_SESSION.write_text(
-            json.dumps(
-                {"work": str(P.DB_WORK), "pid": os.getpid(), "vault": self.name}
-            ),
+            json.dumps({"pid": os.getpid(), "vault": self.name, "mem": True}),
             encoding="utf-8",
         )
 
@@ -133,13 +139,13 @@ class Vault:
         P.VAULT_SESSION.unlink(missing_ok=True)
 
     def _recover_orphan_if_any(self, fernet: Fernet) -> None:
+        """Migra secure.db.work legado (versiones que escribían en disco)."""
         if not P.DB_WORK.exists():
             self._clear_session()
             return
         try:
             enc = fernet.encrypt(P.DB_WORK.read_bytes())
             meta_text = json.dumps(self._meta_json or {})
-            # si no hay meta en memoria, leer del .gor
             if self.gor_path.exists() and not self._meta_json:
                 meta_text, _ = read_gor_parts(self.gor_path)
             elif self._meta_json:
@@ -149,6 +155,50 @@ class Vault:
             pass
         self._shred(P.DB_WORK)
         self._clear_session()
+
+    @staticmethod
+    def _empty_sqlite_bytes() -> bytes:
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        p = Path(path)
+        try:
+            c = sqlite3.connect(p)
+            c.execute("PRAGMA user_version = 0")
+            c.commit()
+            c.close()
+            return p.read_bytes()
+        finally:
+            Vault._shred(p)
+
+    def _open_mem(self, plain: bytes) -> None:
+        """Carga bytes SQLite en :memory: vía backup (portable; sin dejar work file)."""
+        self._conn = sqlite3.connect(":memory:")
+        fd, path = tempfile.mkstemp(suffix=".db")
+        try:
+            os.write(fd, plain)
+        finally:
+            os.close(fd)
+        p = Path(path)
+        try:
+            disk = sqlite3.connect(p)
+            disk.backup(self._conn)
+            disk.close()
+        finally:
+            self._shred(p)
+
+    def _dump_mem(self) -> bytes:
+        if not self._conn:
+            raise VaultError("Bóveda bloqueada")
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        p = Path(path)
+        try:
+            disk = sqlite3.connect(p)
+            self._conn.backup(disk)
+            disk.close()
+            return p.read_bytes()
+        finally:
+            self._shred(p)
 
     def _load_meta(self) -> dict:
         meta_text, _ = read_gor_parts(self.gor_path)
@@ -166,11 +216,7 @@ class Vault:
         fernet = self._fernet_from_key_material(self._derive(password, salt))
         verifier = fernet.encrypt(_VERIFIER).decode("ascii")
         meta = {"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}
-        tmp = P.DATA / f"_init_{self.name}.db"
-        conn = sqlite3.connect(tmp)
-        conn.close()
-        enc = fernet.encrypt(tmp.read_bytes())
-        tmp.unlink(missing_ok=True)
+        enc = fernet.encrypt(self._empty_sqlite_bytes())
         path = vault_gor_path(self.name)
         write_gor(path, json.dumps(meta), enc, self.name)
         register_vault_path(path)
@@ -197,13 +243,11 @@ class Vault:
         self._fernet = fernet
         self._meta_json = meta
         self._recover_orphan_if_any(fernet)
-        # re-read after possible recovery
         if self.gor_path.exists():
             _, enc_bytes = read_gor_parts(self.gor_path)
 
         plain = fernet.decrypt(enc_bytes)
-        P.DB_WORK.write_bytes(plain)
-        self._plain_path = P.DB_WORK
+        self._open_mem(plain)
         self._write_session()
         self._locked = False
         set_active_vault_name(self.name)
@@ -217,7 +261,7 @@ class Vault:
                 pass
 
     def change_password(self, old_password: str, new_password: str) -> None:
-        if self._locked or not self._fernet or not self._plain_path:
+        if self._locked or not self._fernet or not self._conn:
             raise VaultError("Desbloquea la bóveda primero")
         if len(new_password) < 8:
             raise VaultError("La nueva clave debe tener al menos 8 caracteres")
@@ -277,7 +321,7 @@ class Vault:
                 P.ACTIVE_VAULT_FILE.unlink(missing_ok=True)
 
     def reset_contents(self, password: str) -> None:
-        if self._locked or not self._plain_path:
+        if self._locked or not self._conn:
             raise VaultError("Desbloquea primero")
         meta = self._meta_json or self._load_meta()
         salt = bytes.fromhex(meta["salt"])
@@ -288,11 +332,8 @@ class Vault:
         except InvalidToken as e:
             raise VaultError("Clave incorrecta") from e
 
-        tmp = P.DATA / f"_reset_{self.name}.db"
-        conn = sqlite3.connect(tmp)
-        conn.close()
-        self._plain_path.write_bytes(tmp.read_bytes())
-        tmp.unlink(missing_ok=True)
+        self._conn.close()
+        self._open_mem(self._empty_sqlite_bytes())
         self.flush()
 
     def _register_shutdown_hooks(self) -> None:
@@ -308,15 +349,20 @@ class Vault:
     def lock(self) -> None:
         if self._locked:
             return
-        if self._fernet and self._plain_path and self._plain_path.exists():
+        if self._fernet and self._conn:
             try:
                 self.flush()
             except Exception:
                 pass
-            self._shred(self._plain_path)
-        self._plain_path = None
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+        self._conn = None
         self._fernet = None
         self._meta_json = None
+        if P.DB_WORK.exists():
+            self._shred(P.DB_WORK)
         self._clear_session()
         self._locked = True
         global _ACTIVE
@@ -324,8 +370,8 @@ class Vault:
             _ACTIVE = None
 
     def flush(self) -> None:
-        if self._fernet and self._plain_path and self._plain_path.exists() and self._meta_json:
-            enc = self._fernet.encrypt(self._plain_path.read_bytes())
+        if self._fernet and self._conn and self._meta_json:
+            enc = self._fernet.encrypt(self._dump_mem())
             write_gor(self.gor_path, json.dumps(self._meta_json), enc, self.name)
 
     def export_backup(self, dest: str | Path) -> Path:
@@ -334,7 +380,6 @@ class Vault:
             self.flush()
         if not self.gor_path.exists():
             raise VaultError("No hay bóveda para exportar")
-        # nativo .gor; .cbvault sigue siendo el mismo zip
         if dest.suffix.lower() not in (".gor", ".cbvault"):
             dest = dest.with_suffix(".gor")
         dest.write_bytes(self.gor_path.read_bytes())
@@ -353,7 +398,6 @@ class Vault:
         if dest.exists() and not overwrite:
             raise VaultError(f"Ya existe la bóveda '{name}'")
 
-        # valida que sea zip con meta+enc
         try:
             meta_text, enc = read_gor_parts(src)
         except (ValueError, zipfile.BadZipFile) as e:
@@ -370,10 +414,9 @@ class Vault:
         self.select(name)
 
     def _merge_legacy(self, legacy: Path) -> None:
-        if not self._plain_path:
+        if not self._conn:
             return
         src = sqlite3.connect(legacy)
-        dst = sqlite3.connect(self._plain_path)
         try:
             for table in ("data", "messages", "capsules"):
                 try:
@@ -387,15 +430,14 @@ class Vault:
                 col_list = ",".join(cols)
                 for row in rows:
                     try:
-                        dst.execute(
+                        self._conn.execute(
                             f"INSERT OR IGNORE INTO {table} ({col_list}) VALUES ({placeholders})",
                             row,
                         )
                     except sqlite3.Error:
                         pass
-            dst.commit()
+            self._conn.commit()
         finally:
             src.close()
-            dst.close()
         legacy.rename(legacy.with_suffix(".db.bak"))
         self.flush()

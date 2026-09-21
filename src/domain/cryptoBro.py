@@ -22,7 +22,7 @@ class CryptoBro:
 
     def __init__(self, vault: Vault):
         self.vault = vault
-        self.db = Database(vault.db_path)
+        self.db = Database(vault.db_path, on_write=vault.flush, conn=vault.db_conn)
         self._import_legacy_if_any()
 
     def _import_legacy_if_any(self) -> None:
