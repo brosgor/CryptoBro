@@ -396,5 +396,149 @@ class CryptoService:
         """Persiste la BD en memoria al .gor de inmediato."""
         self.vault.flush()
 
+    def vault_info(self) -> dict:
+        return self.vault.vault_info()
+
+    def set_vault_description(self, description: str) -> None:
+        self.vault.set_description(description)
+
+    def hash_vault_file(self, progress=None) -> dict:
+        return self.hash_file(str(self.vault.gor_path), progress=progress)
+
+    def list_bodega(self) -> list:
+        from pathlib import Path
+
+        from domain.cryptoBro import read_bros_name
+        from domain.paths import cipher_dir
+
+        items = []
+        for p in sorted(Path(cipher_dir()).glob("*.bros")):
+            if not p.is_file():
+                continue
+            try:
+                st = p.stat()
+                items.append(
+                    {
+                        "path": str(p),
+                        "opaque": p.name,
+                        "original": read_bros_name(str(p)),
+                        "size": st.st_size,
+                        "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(
+                            timespec="seconds"
+                        ),
+                    }
+                )
+            except OSError:
+                continue
+        return items
+
+    def import_bros_file(self, src: str) -> str:
+        import shutil
+        from pathlib import Path
+
+        from domain.paths import cipher_dir
+
+        src_p = Path(src)
+        if not src_p.is_file():
+            raise FileNotFoundError("Archivo no encontrado")
+        d = cipher_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / src_p.name
+        if dest.resolve() == src_p.resolve():
+            return str(dest)
+        if dest.exists():
+            stem = src_p.stem
+            n = 1
+            while (d / f"{stem}_{n}.bros").exists():
+                n += 1
+            dest = d / f"{stem}_{n}.bros"
+        shutil.copy2(src_p, dest)
+        return str(dest)
+
+    def export_capsule(self, capsule_id: int, dest: str) -> str:
+        import zipfile
+        from pathlib import Path
+
+        cap = self.crypto_bro.getCapsuleById(capsule_id)
+        if not cap:
+            raise ValueError("Cápsula no encontrada")
+        src = Path(cap.bros_path)
+        if not src.is_file():
+            raise FileNotFoundError(f"No está el .bros: {cap.bros_path}")
+        dest = Path(dest)
+        if dest.suffix.lower() != ".cap":
+            dest = dest.with_suffix(".cap")
+        payload = src.read_bytes()
+        meta = {
+            "v": 1,
+            "app": "CryptoBro",
+            "format": "cap",
+            "label": cap.label,
+            "unlock_at": cap.unlock_at,
+            "extension": cap.extension,
+            "key": cap.key,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("capsule.json", json.dumps(meta, indent=2))
+            zf.writestr("payload.bros", payload)
+        return str(dest)
+
+    def import_capsule(self, src: str) -> int:
+        import zipfile
+        from pathlib import Path
+
+        from domain.paths import cipher_dir
+
+        src = Path(src)
+        if not src.is_file():
+            raise FileNotFoundError("Archivo no encontrado")
+        try:
+            with zipfile.ZipFile(src, "r") as zf:
+                meta = json.loads(zf.read("capsule.json"))
+                payload = zf.read("payload.bros")
+        except Exception as e:
+            raise ValueError("Copia de cápsula inválida (.cap)") from e
+        if meta.get("sha256") and hashlib.sha256(payload).hexdigest() != meta["sha256"]:
+            raise ValueError("Integridad fallida: el .cap está corrupto o alterado")
+        if not meta.get("key"):
+            raise ValueError("La cápsula no trae clave")
+        d = cipher_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        bros_path = str(d / (secrets.token_hex(16) + ".bros"))
+        Path(bros_path).write_bytes(payload)
+        cid = self.crypto_bro.addCapsule(
+            meta.get("label", "importada"),
+            bros_path,
+            meta["key"],
+            meta.get("unlock_at") or datetime.now().isoformat(timespec="seconds"),
+            meta.get("extension", ""),
+        )
+        return cid
+
+    def write_recovery_par(self, phrase: str, bros_path: str) -> str:
+        token = self.vault.encrypt_recovery(phrase)
+        par_path = os.path.splitext(bros_path)[0] + ".par"
+        with open(par_path, "w", encoding="utf-8") as f:
+            json.dump({"v": 2, "kind": "recovery", "data": token}, f)
+        return par_path
+
+    def read_recovery_par(self, par_path: str) -> str:
+        with open(par_path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw  # legado: texto plano
+        if isinstance(data, dict) and data.get("v") == 2 and data.get("kind") == "recovery":
+            from cryptography.fernet import InvalidToken
+
+            try:
+                return self.vault.decrypt_recovery(data["data"])
+            except InvalidToken:
+                raise ValueError("El .par está cifrado con otra bóveda (clave distinta)")
+        return raw
+
     def lock(self) -> None:
         self.vault.lock()

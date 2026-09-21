@@ -69,6 +69,7 @@ class Vault:
         self._fernet: Fernet | None = None
         self._conn: sqlite3.Connection | None = None
         self._meta_json: dict | None = None
+        self._recovery_key: str | None = None
         self._locked = True
         # GUI worker threads (Resolver/hash) may touch the same :memory: conn
         self._db_lock = threading.RLock()
@@ -194,6 +195,90 @@ class Vault:
         meta_text, _ = read_gor_parts(self.gor_path)
         return json.loads(meta_text)
 
+    @staticmethod
+    def _now_iso() -> str:
+        from datetime import datetime
+
+        return datetime.now().isoformat(timespec="seconds")
+
+    @staticmethod
+    def _recovery_key_from_meta(meta: dict, fernet: Fernet) -> str | None:
+        raw = meta.get("recovery")
+        if not raw:
+            return None
+        try:
+            return fernet.decrypt(raw.encode("ascii")).decode("ascii")
+        except Exception:
+            return None
+
+    def _recovery_fernet(self) -> Fernet:
+        if self._locked or not self._fernet or not self._meta_json:
+            raise VaultError("Desbloquea la bóveda primero")
+        if self._recovery_key is None:
+            self._recovery_key = Fernet.generate_key().decode("ascii")
+            self._meta_json["recovery"] = self._fernet.encrypt(
+                self._recovery_key.encode("ascii")
+            ).decode("ascii")
+            self.flush()
+        return Fernet(self._recovery_key.encode("ascii"))
+
+    def encrypt_recovery(self, text: str) -> str:
+        return self._recovery_fernet().encrypt(text.encode("utf-8")).decode("ascii")
+
+    def decrypt_recovery(self, token: str) -> str:
+        return self._recovery_fernet().decrypt(token.encode("ascii")).decode("utf-8")
+
+    @staticmethod
+    def _stat_time(path: Path, ctime: bool = False) -> str | None:
+        try:
+            from datetime import datetime
+
+            st = path.stat()
+            t = st.st_ctime if ctime else st.st_mtime
+            return datetime.fromtimestamp(t).isoformat(timespec="seconds")
+        except Exception:
+            return None
+
+    def vault_info(self) -> dict:
+        """Ficha de la bóveda legible sin desbloquear (el meta no está cifrado)."""
+        meta = self._meta_json
+        if meta is None:
+            try:
+                meta = self._load_meta()
+            except Exception:
+                meta = {}
+        path = self.gor_path
+        created = meta.get("created_at")
+        modified = meta.get("modified_at")
+        if not created:
+            try:
+                with zipfile.ZipFile(path) as zf:
+                    info = json.loads(zf.read(P.GOR_INFO))
+                    created = info.get("created")
+            except Exception:
+                pass
+        if not created:
+            created = self._stat_time(path, ctime=True)
+        if not modified:
+            modified = self._stat_time(path, ctime=False)
+        return {
+            "name": self.name,
+            "path": str(path),
+            "exists": path.exists(),
+            "size": path.stat().st_size if path.exists() else 0,
+            "description": meta.get("description", ""),
+            "created_at": created,
+            "modified_at": modified,
+        }
+
+    def set_description(self, description: str) -> None:
+        if self._locked or not self._fernet or not self._conn:
+            raise VaultError("Desbloquea la bóveda primero")
+        meta = self._meta_json or self._load_meta()
+        meta["description"] = (description or "").strip()
+        self._meta_json = meta
+        self.flush()
+
     def setup(self, password: str, name: str | None = None) -> None:
         if name:
             self.select(name)
@@ -205,7 +290,18 @@ class Vault:
         salt = os.urandom(16)
         fernet = self._fernet_from_key_material(self._derive(password, salt))
         verifier = fernet.encrypt(_VERIFIER).decode("ascii")
-        meta = {"v": 1, "salt": salt.hex(), "verifier": verifier, "name": self.name}
+        recovery_key = Fernet.generate_key().decode("ascii")
+        now = self._now_iso()
+        meta = {
+            "v": 1,
+            "salt": salt.hex(),
+            "verifier": verifier,
+            "name": self.name,
+            "description": "",
+            "created_at": now,
+            "modified_at": now,
+            "recovery": fernet.encrypt(recovery_key.encode("ascii")).decode("ascii"),
+        }
         enc = fernet.encrypt(self._empty_sqlite_bytes())
         path = vault_gor_path(self.name)
         write_gor(path, json.dumps(meta), enc, self.name)
@@ -232,6 +328,7 @@ class Vault:
 
         self._fernet = fernet
         self._meta_json = meta
+        self._recovery_key = self._recovery_key_from_meta(meta, fernet)
         self._recover_orphan_if_any(fernet)
         if self.gor_path.exists():
             _, enc_bytes = read_gor_parts(self.gor_path)
@@ -267,12 +364,21 @@ class Vault:
         salt = os.urandom(16)
         new_f = self._fernet_from_key_material(self._derive(new_password, salt))
         verifier = new_f.encrypt(_VERIFIER).decode("ascii")
-        self._meta_json = {
+        prev = self._meta_json or {}
+        new_meta = {
             "v": 1,
             "salt": salt.hex(),
             "verifier": verifier,
             "name": self.name,
+            "description": prev.get("description", ""),
+            "created_at": prev.get("created_at") or self._now_iso(),
+            "modified_at": self._now_iso(),
         }
+        if self._recovery_key is not None:
+            new_meta["recovery"] = new_f.encrypt(
+                self._recovery_key.encode("ascii")
+            ).decode("ascii")
+        self._meta_json = new_meta
         self._fernet = new_f
         self.flush()
 
@@ -351,6 +457,7 @@ class Vault:
         self._conn = None
         self._fernet = None
         self._meta_json = None
+        self._recovery_key = None
         if P.DB_WORK.exists():
             self._shred(P.DB_WORK)
         self._clear_session()
@@ -362,6 +469,7 @@ class Vault:
     def flush(self) -> None:
         with self._db_lock:
             if self._fernet and self._conn and self._meta_json:
+                self._meta_json["modified_at"] = self._now_iso()
                 enc = self._fernet.encrypt(self._dump_mem_unlocked())
                 write_gor(self.gor_path, json.dumps(self._meta_json), enc, self.name)
 

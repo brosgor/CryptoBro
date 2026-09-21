@@ -312,6 +312,25 @@ class CryptoBro:
         return self.db.deleteCapsule(capsule_id)
 
 
+def read_bros_name(path: str) -> str:
+    """Lee el nombre original desde el header del .bros sin descifrar."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(5)
+            if header[:4] != _BROS_MAGIC:
+                return os.path.basename(path)
+            ver = header[4]
+            f.read(16)  # salt
+            if ver >= 2:
+                name_len = struct.unpack(">H", f.read(2))[0]
+                return f.read(name_len).decode("utf-8", errors="replace")
+            ext_len = struct.unpack(">H", f.read(2))[0]
+            ext = f.read(ext_len).decode("utf-8", errors="replace")
+            return os.path.basename(path) + ext
+    except Exception:
+        return os.path.basename(path)
+
+
 def _shred_file(path: str, chunk: int = _CHUNK_SIZE) -> None:
     """Sobrescribe con aleatorio por chunks y borra (sin cargar el archivo entero)."""
     if not os.path.exists(path):

@@ -42,6 +42,7 @@ class CryptoApp:
         tabControl = ttk.Notebook(self.root)
         self._notebook = tabControl
 
+        self.tab_vault = ttk.Frame(tabControl)
         self.tab_encrypt = ttk.Frame(tabControl)
         self.tab_decrypt = ttk.Frame(tabControl)
         self.tab_capsules = ttk.Frame(tabControl)
@@ -50,6 +51,7 @@ class CryptoApp:
         self.tab_gen = ttk.Frame(tabControl)
         self.tab_keys = ttk.Frame(tabControl)
 
+        tabControl.add(self.tab_vault, text="Bóveda")
         tabControl.add(self.tab_encrypt, text="Cifrar")
         tabControl.add(self.tab_decrypt, text="Descifrar")
         tabControl.add(self.tab_capsules, text="Cápsulas")
@@ -60,6 +62,7 @@ class CryptoApp:
 
         tabControl.pack(expand=1, fill="both", padx=10, pady=10)
 
+        self.setup_vault_tab()
         self.setup_encrypt_tab()
         self.setup_decrypt_tab()
         self.setup_capsules_tab()
@@ -67,6 +70,161 @@ class CryptoApp:
         self.setup_hash_tab()
         self.setup_generator_tab()
         self.setup_keys_tab()
+
+    def setup_vault_tab(self):
+        outer = ttk.Frame(self.tab_vault, padding="20")
+        outer.pack(fill="both", expand=True)
+
+        page_header(
+            outer,
+            "Bóveda",
+            "Ficha de la bóveda activa: trazabilidad, integridad y acciones de sesión.",
+        ).pack(anchor="w", fill="x", pady=(0, 12))
+
+        info = self.service.vault_info()
+
+        grid = ttk.Frame(outer)
+        grid.pack(fill="x")
+        grid.columnconfigure(1, weight=1)
+
+        ttk.Label(grid, text="Nombre", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        ttk.Label(grid, text=info["name"]).grid(row=0, column=1, sticky="w", pady=3)
+        ttk.Label(grid, text="Archivo", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        ttk.Label(grid, text=info["path"], style="Hint.TLabel", wraplength=560, justify="left").grid(
+            row=1, column=1, sticky="w", pady=3
+        )
+        ttk.Label(grid, text="Tamaño", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=2, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        ttk.Label(grid, text=self._fmt_size(info["size"])).grid(row=2, column=1, sticky="w", pady=3)
+        ttk.Label(grid, text="Creada", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=3, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        ttk.Label(grid, text=info["created_at"] or "—").grid(row=3, column=1, sticky="w", pady=3)
+        ttk.Label(grid, text="Modificada", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=4, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        ttk.Label(grid, text=info["modified_at"] or "—").grid(row=4, column=1, sticky="w", pady=3)
+
+        ttk.Label(grid, text="Descripción", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=5, column=0, sticky="nw", pady=3, padx=(0, 10)
+        )
+        self.desc_text = tk.Text(
+            grid, height=4, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG,
+            highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0, font=T.FONT,
+        )
+        self.desc_text.grid(row=5, column=1, sticky="ew", pady=3)
+        self.desc_text.insert("1.0", info["description"] or "")
+        RoundedButton(grid, text="Guardar descripción", command=self.save_description).grid(
+            row=6, column=1, sticky="e", pady=4
+        )
+
+        ttk.Label(outer, text="Integridad (.gor)", style="Heading.TLabel", font=T.FONT_SUB).pack(
+            anchor="w", pady=(16, 4)
+        )
+        hframe = ttk.Frame(outer)
+        hframe.pack(fill="x")
+        hframe.columnconfigure(1, weight=1)
+        self.vault_md5 = tk.StringVar()
+        self.vault_sha1 = tk.StringVar()
+        self.vault_sha256 = tk.StringVar()
+        self.vault_hash_status = tk.StringVar(value="")
+        for i, (lab, var) in enumerate(
+            [("MD5", self.vault_md5), ("SHA-1", self.vault_sha1), ("SHA-256", self.vault_sha256)]
+        ):
+            ttk.Label(hframe, text=lab, style="Bold.TLabel", font=T.FONT_BOLD).grid(
+                row=i, column=0, sticky="w", pady=3, padx=(0, 10)
+            )
+            ttk.Entry(hframe, textvariable=var).grid(row=i, column=1, sticky="ew", pady=3)
+            RoundedButton(hframe, text="Copiar", command=lambda v=var: self._copy_hash(v.get())).grid(
+                row=i, column=2, padx=6
+            )
+        hbtns = ttk.Frame(outer)
+        hbtns.pack(fill="x", pady=(6, 0))
+        RoundedButton(hbtns, text="Calcular hash", command=self.compute_vault_hashes).pack(side="left", padx=4)
+        ttk.Label(hbtns, textvariable=self.vault_hash_status, style="Hint.TLabel").pack(side="left", padx=8)
+
+        ttk.Label(outer, text="Sesión", style="Heading.TLabel", font=T.FONT_SUB).pack(
+            anchor="w", pady=(16, 4)
+        )
+        ab1 = ttk.Frame(outer)
+        ab1.pack(fill="x", pady=3)
+        RoundedButton(ab1, text="Cerrar sesión", command=self.logout).pack(side="left", padx=4)
+        RoundedButton(ab1, text="Cambiar de bóveda", command=self.go_vault_selector).pack(side="left", padx=4)
+        RoundedButton(ab1, text="Bloquear bóveda", command=self.lock_vault).pack(side="left", padx=4)
+        ab2 = ttk.Frame(outer)
+        ab2.pack(fill="x", pady=3)
+        RoundedButton(ab2, text="Cambiar clave de bloqueo", command=self.change_lock_password).pack(side="left", padx=4)
+        RoundedButton(ab2, text="Exportar bóveda", command=self.export_vault_backup).pack(side="left", padx=4)
+        RoundedButton(ab2, text="Guardar ahora", command=self.save_vault_now).pack(side="left", padx=4)
+
+    @staticmethod
+    def _fmt_size(n: int) -> str:
+        if n < 1024:
+            return f"{n} B"
+        value = float(n)
+        for unit in ("KB", "MB", "GB", "TB"):
+            value /= 1024
+            if value < 1024 or unit == "TB":
+                return f"{value:.1f} {unit}"
+        return f"{n} B"
+
+    def save_description(self):
+        try:
+            self.service.set_vault_description(self.desc_text.get("1.0", tk.END))
+            messagebox.showinfo("Guardado", "Descripción actualizada.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def compute_vault_hashes(self):
+        if getattr(self, "_vault_hash_busy", False):
+            return
+        self._vault_hash_busy = True
+        self.vault_hash_status.set("Calculando…")
+        self.vault_md5.set("")
+        self.vault_sha1.set("")
+        self.vault_sha256.set("")
+        import threading
+
+        result = {}
+
+        def work():
+            try:
+                result.update(self.service.hash_vault_file())
+            except Exception as e:
+                result["_err"] = str(e)
+
+        def poll():
+            if "_err" in result:
+                self._vault_hash_busy = False
+                self.vault_hash_status.set("")
+                messagebox.showerror("Error", result["_err"])
+                return
+            if result:
+                self.vault_md5.set(result["md5"])
+                self.vault_sha1.set(result["sha1"])
+                self.vault_sha256.set(result["sha256"])
+                self.vault_hash_status.set("Hash del .gor actual")
+                self._vault_hash_busy = False
+                return
+            self.root.after(80, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(80, poll)
+
+    def logout(self):
+        if not messagebox.askyesno("Cerrar sesión", "¿Cerrar la sesión y salir de CryptoBro?"):
+            return
+        self.want_switch_vault = False
+        try:
+            self.service.lock()
+        except Exception:
+            pass
+        self.root.destroy()
 
     def setup_encrypt_tab(self):
         """Configura los widgets de la pestaña de encriptación."""
@@ -213,14 +371,12 @@ class CryptoApp:
                     "Guardar frase",
                     f"Tu frase de recuperación es:\n\n{passphrase}\n\n"
                     "¿Copiar al portapapeles y guardar en un archivo .par?\n\n"
-                    "Aviso: .par es texto plano — se guardará junto al .bros opaco.",
+                    "El .par se guarda CIFRADO con la clave de la bóveda (no en texto plano).",
                 ):
                     self.root.clipboard_clear()
                     self.root.clipboard_append(passphrase)
-                    par_path = os.path.splitext(bros_path)[0] + ".par"
-                    with open(par_path, "w") as f:
-                        f.write(passphrase)
-                    msg += f"\nFrase copiada y guardada en: {par_path}"
+                    par_path = self.service.write_recovery_par(passphrase, bros_path)
+                    msg += f"\nFrase copiada y guardada (cifrada) en: {par_path}"
                 else:
                     if messagebox.askyesno("Portapapeles", "¿Copiar la frase al portapapeles?"):
                         self.root.clipboard_clear()
@@ -249,11 +405,32 @@ class CryptoApp:
         page_header(
             outer,
             "Descifrar archivo",
-            "Usa la clave manual o la frase de recuperación guardada en la bóveda.",
+            "Elige de la bodega (o importa un .bros) y usa la clave manual o la frase guardada.",
         ).pack(anchor="w", fill="x", pady=(0, 14))
 
-        frame = ttk.Frame(outer)
-        frame.pack(fill="both", expand=True)
+        body = ttk.Frame(outer)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        left = ttk.Frame(body, padding=(0, 0, 10, 0))
+        left.grid(row=0, column=0, sticky="nsw")
+        ttk.Label(left, text="Bodega", style="Heading.TLabel", font=T.FONT_SUB).pack(
+            anchor="w", pady=(0, 6)
+        )
+        self.bodega_listbox = tk.Listbox(
+            left, width=34,
+            bg=T.SURFACE, fg=T.FG, selectbackground=T.SELECT, selectforeground=T.SELECT_FG,
+            borderwidth=1, highlightthickness=1, highlightbackground=T.BORDER, font=T.FONT,
+        )
+        self.bodega_listbox.pack(fill="both", expand=True, pady=5)
+        self.bodega_listbox.bind("<<ListboxSelect>>", self._on_bodega_select)
+        bbtns = ttk.Frame(left)
+        bbtns.pack(fill="x", pady=5)
+        RoundedButton(bbtns, text="Actualizar", command=self.refresh_bodega_list).pack(fill="x", pady=2)
+        RoundedButton(bbtns, text="Importar .bros", command=self.import_bros_to_bodega).pack(fill="x", pady=2)
+
+        frame = ttk.Frame(body)
+        frame.grid(row=0, column=1, sticky="nsew")
         frame.columnconfigure(1, weight=1)
 
         self.dec_file_path = tk.StringVar()
@@ -285,12 +462,46 @@ class CryptoApp:
 
         RoundedButton(frame, text="Descifrar", command=self.perform_decryption).grid(row=4, column=1, pady=20)
 
+        self.refresh_bodega_list()
+
+    def refresh_bodega_list(self):
+        if not hasattr(self, "bodega_listbox"):
+            return
+        self._bodega_cache = self.service.list_bodega()
+        caps = self.service.get_all_capsules()
+        cap_paths = {os.path.abspath(c.bros_path) for c in caps if c.bros_path}
+        self.bodega_listbox.delete(0, tk.END)
+        for it in self._bodega_cache:
+            tag = "  [cápsula]" if os.path.abspath(it["path"]) in cap_paths else ""
+            self.bodega_listbox.insert(tk.END, f"{it['original']}{tag}")
+
+    def _on_bodega_select(self, event=None):
+        sel = self.bodega_listbox.curselection()
+        if not sel:
+            return
+        it = self._bodega_cache[sel[0]]
+        self.dec_file_path.set(it["path"])
+
+    def import_bros_to_bodega(self):
+        path = filedialog.askopenfilename(
+            title="Importar archivo cifrado",
+            filetypes=[("Archivos .bros", "*.bros"), ("Todos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            dest = self.service.import_bros_file(path)
+            self.refresh_bodega_list()
+            self.dec_file_path.set(dest)
+            messagebox.showinfo("Importado", f"Archivo en la bodega:\n{dest}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
     def load_par_file(self):
         filename = filedialog.askopenfilename(filetypes=[("Archivos .par", "*.par"), ("Texto", "*.txt")])
         if filename:
             try:
-                with open(filename, 'r') as f:
-                    content = f.read().strip()
+                content = self.service.read_recovery_par(filename)
                 self.entry_dec_pass.delete(0, tk.END)
                 self.entry_dec_pass.insert(0, content)
             except Exception as e:
@@ -1122,6 +1333,8 @@ class CryptoApp:
         self.btn_unlock_cap.pack(side="left", padx=4)
         RoundedButton(btns, text="Actualizar", command=self.refresh_capsules).pack(side="left", padx=4)
         RoundedButton(btns, text="Eliminar", command=self.delete_selected_capsule).pack(side="left", padx=4)
+        RoundedButton(btns, text="Exportar", command=self.export_selected_capsule).pack(side="left", padx=4)
+        RoundedButton(btns, text="Importar", command=self.import_capsule).pack(side="left", padx=4)
 
         self._draw_cap_timer(None)
         self.refresh_capsules()
@@ -1537,6 +1750,42 @@ class CryptoApp:
             )
         self.service.delete_capsule(cid, wipe_bros=wipe)
         self.refresh_capsules()
+
+    def export_selected_capsule(self):
+        sel = self.cap_tree.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecciona una cápsula para exportar.")
+            return
+        cid = int(sel[0])
+        cap = next((c for c in getattr(self, "_capsules_cache", []) if c.id == cid), None)
+        name = (cap.label if cap else "capsula") or "capsula"
+        path = filedialog.asksaveasfilename(
+            title="Exportar cápsula",
+            defaultextension=".cap",
+            filetypes=[("Cápsula CryptoBro", "*.cap")],
+            initialfile=f"{name}.cap",
+        )
+        if not path:
+            return
+        try:
+            out = self.service.export_capsule(cid, path)
+            messagebox.showinfo("Exportada", f"Cápsula exportada a:\n{out}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def import_capsule(self):
+        path = filedialog.askopenfilename(
+            title="Importar cápsula",
+            filetypes=[("Cápsula CryptoBro", "*.cap"), ("Todos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            cid = self.service.import_capsule(path)
+            self.refresh_capsules()
+            messagebox.showinfo("Importada", f"Cápsula importada (ID {cid}).")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
     # --- Messaging Tab ---
     def setup_messages_tab(self):
