@@ -5,7 +5,7 @@ from domain.vault import Vault
 from domain.paths import ICON_PNG
 from gui.widgets import RoundedButton
 from gui import theme as T
-from gui.theme import apply_ttk_theme
+from gui.theme import apply_ttk_theme, page_header
 import os
 
 class CryptoApp:
@@ -70,19 +70,30 @@ class CryptoApp:
 
     def setup_encrypt_tab(self):
         """Configura los widgets de la pestaña de encriptación."""
-        frame = ttk.Frame(self.tab_encrypt, padding="20")
-        frame.pack(fill="both", expand=True)
+        outer = ttk.Frame(self.tab_encrypt, padding="20")
+        outer.pack(fill="both", expand=True)
+        page_header(
+            outer,
+            "Cifrar archivo",
+            "Elige un archivo y una clave. Opcionalmente guarda la clave en la bóveda con una frase memorable.",
+        ).pack(anchor="w", fill="x", pady=(0, 14))
 
+        frame = ttk.Frame(outer)
+        frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
-        
+
         # Selección de archivo
         self.enc_file_path = tk.StringVar()
-        ttk.Label(frame, text="Archivo a cifrar:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(frame, text="Archivo a cifrar", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
         ttk.Entry(frame, textvariable=self.enc_file_path).grid(row=0, column=1, sticky="ew", pady=5, padx=5)
         RoundedButton(frame, text="Examinar", command=self.browse_encrypt_file).grid(row=0, column=2, padx=5, pady=5)
-        
+
         # Clave + ver + longitud + generar
-        ttk.Label(frame, text="Clave de cifrado:").grid(row=1, column=0, sticky="nw", pady=5)
+        ttk.Label(frame, text="Clave de cifrado", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="nw", pady=5
+        )
         self.enc_key = tk.StringVar()
         self.enc_key_len = tk.IntVar(value=20)
         self.enc_show_key = tk.BooleanVar(value=False)
@@ -121,8 +132,15 @@ class CryptoApp:
         cb = ttk.Checkbutton(frame, text="¿Guardar clave en la bóveda?", variable=self.store_key_var, command=self.toggle_encrypt_pass_info)
         cb.grid(row=2, column=1, sticky="w", pady=(10, 5), padx=5)
 
-        self.lbl_pass_title = ttk.Label(frame, text="Frase de recuperación:")
-        self.lbl_pass_info = ttk.Label(frame, text="Se generará automáticamente una frase memorable de 6 palabras.", wraplength=400)
+        self.lbl_pass_title = ttk.Label(
+            frame, text="Frase de recuperación", style="Bold.TLabel", font=T.FONT_BOLD
+        )
+        self.lbl_pass_info = ttk.Label(
+            frame,
+            text="Se generará automáticamente una frase memorable de 6 palabras.",
+            style="Hint.TLabel",
+            wraplength=400,
+        )
         
         self.btn_action = RoundedButton(frame, text="Cifrar", command=self.perform_encryption)
         self.btn_action.grid(row=4, column=1, pady=20)
@@ -227,23 +245,36 @@ class CryptoApp:
             messagebox.showerror("Error", str(e))
 
     def setup_decrypt_tab(self):
-        frame = ttk.Frame(self.tab_decrypt, padding="20")
+        outer = ttk.Frame(self.tab_decrypt, padding="20")
+        outer.pack(fill="both", expand=True)
+        page_header(
+            outer,
+            "Descifrar archivo",
+            "Usa la clave manual o la frase de recuperación guardada en la bóveda.",
+        ).pack(anchor="w", fill="x", pady=(0, 14))
+
+        frame = ttk.Frame(outer)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
         self.dec_file_path = tk.StringVar()
-        ttk.Label(frame, text="Archivo a descifrar (.bros):").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(frame, text="Archivo (.bros)", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
         ttk.Entry(frame, textvariable=self.dec_file_path).grid(row=0, column=1, sticky="ew", pady=5, padx=5)
         RoundedButton(frame, text="Examinar", command=self.browse_decrypt_file).grid(row=0, column=2, padx=5, pady=5)
-        
+
+        ttk.Label(frame, text="Método", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(12, 4)
+        )
         self.dec_mode = tk.StringVar(value="manual")
-        ttk.Radiobutton(frame, text="Clave manual", variable=self.dec_mode, value="manual", command=self.toggle_dec_inputs).grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Radiobutton(frame, text="Desde la bóveda", variable=self.dec_mode, value="db", command=self.toggle_dec_inputs).grid(row=1, column=1, sticky="w", pady=5)
-        
-        self.lbl_dec_key = ttk.Label(frame, text="Clave de descifrado:")
+        ttk.Radiobutton(frame, text="Clave manual", variable=self.dec_mode, value="manual", command=self.toggle_dec_inputs).grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Radiobutton(frame, text="Desde la bóveda", variable=self.dec_mode, value="db", command=self.toggle_dec_inputs).grid(row=2, column=1, sticky="w", pady=5)
+
+        self.lbl_dec_key = ttk.Label(frame, text="Clave de descifrado", style="Bold.TLabel", font=T.FONT_BOLD)
         self.entry_dec_key = ttk.Entry(frame, show="*")
-        
-        self.lbl_dec_pass = ttk.Label(frame, text="Frase o archivo .par:")
+
+        self.lbl_dec_pass = ttk.Label(frame, text="Frase o archivo .par", style="Bold.TLabel", font=T.FONT_BOLD)
         self.pass_frame = ttk.Frame(frame)
         self.pass_frame.columnconfigure(0, weight=1)
 
@@ -252,7 +283,7 @@ class CryptoApp:
         RoundedButton(self.pass_frame, text="Cargar .par", command=self.load_par_file).pack(side="left")
         
         self.toggle_dec_inputs()
-        
+
         RoundedButton(frame, text="Descifrar", command=self.perform_decryption).grid(row=4, column=1, pady=20)
 
     def load_par_file(self):
@@ -277,15 +308,15 @@ class CryptoApp:
                 self.lbl_dec_pass.grid_remove()
                 self.pass_frame.grid_remove()
             if hasattr(self, 'lbl_dec_key'):
-                self.lbl_dec_key.grid(row=2, column=0, sticky="w", pady=5)
-                self.entry_dec_key.grid(row=2, column=1, sticky="ew", pady=5, padx=5)
+                self.lbl_dec_key.grid(row=3, column=0, sticky="w", pady=5)
+                self.entry_dec_key.grid(row=3, column=1, sticky="ew", pady=5, padx=5)
         else:
             if hasattr(self, 'lbl_dec_key'):
                 self.lbl_dec_key.grid_remove()
                 self.entry_dec_key.grid_remove()
             if hasattr(self, 'lbl_dec_pass'):
-                self.lbl_dec_pass.grid(row=2, column=0, sticky="w", pady=5)
-                self.pass_frame.grid(row=2, column=1, pady=5, sticky="ew", padx=5)
+                self.lbl_dec_pass.grid(row=3, column=0, sticky="w", pady=5)
+                self.pass_frame.grid(row=3, column=1, pady=5, sticky="ew", padx=5)
 
     def perform_decryption(self):
         file_path = self.dec_file_path.get()
@@ -333,46 +364,65 @@ class CryptoApp:
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Calculadora de hash", font=("DejaVu Sans", 12, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w"
-        )
-        ttk.Label(
+        page_header(
             frame,
-            text="Archivo, carpeta (manifiesto recursivo) o texto. "
-            "Usa Calcular cuando quieras. MD5/SHA-1 = comprobación rápida; SHA-256 = mejor integridad.",
-            wraplength=700,
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 12))
+            "Calculadora de hash",
+            "Archivo, carpeta (manifiesto recursivo) o texto. "
+            "MD5/SHA-1 = comprobación rápida; SHA-256 = mejor integridad.",
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
 
         self.hash_mode = tk.StringVar(value="file")
+        self._hash_busy = False
+        ttk.Label(frame, text="Entrada", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(0, 4)
+        )
         modes = ttk.Frame(frame)
         modes.grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 6))
-        ttk.Radiobutton(
+        self.hash_radio_file = ttk.Radiobutton(
             modes, text="Archivo", variable=self.hash_mode, value="file", command=self._toggle_hash_mode
-        ).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(
+        )
+        self.hash_radio_file.pack(side="left", padx=(0, 12))
+        self.hash_radio_folder = ttk.Radiobutton(
             modes, text="Carpeta", variable=self.hash_mode, value="folder", command=self._toggle_hash_mode
-        ).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(
+        )
+        self.hash_radio_folder.pack(side="left", padx=(0, 12))
+        self.hash_radio_text = ttk.Radiobutton(
             modes, text="Texto", variable=self.hash_mode, value="text", command=self._toggle_hash_mode
-        ).pack(side="left")
+        )
+        self.hash_radio_text.pack(side="left")
 
         self.hash_path = tk.StringVar()
-        self.lbl_hash_path = ttk.Label(frame, text="Ruta:")
+        self.lbl_hash_path = ttk.Label(frame, text="Ruta", style="Bold.TLabel", font=T.FONT_BOLD)
         self.entry_hash_path = ttk.Entry(frame, textvariable=self.hash_path)
         self.btn_hash_browse = RoundedButton(frame, text="Examinar", command=self._browse_hash_target)
 
-        self.lbl_hash_text = ttk.Label(frame, text="Texto:")
+        self.lbl_hash_text = ttk.Label(frame, text="Texto", style="Bold.TLabel", font=T.FONT_BOLD)
         self.hash_text = tk.Text(
-            frame, height=6, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG, highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0
+            frame,
+            height=6,
+            bg=T.SURFACE,
+            fg=T.FG,
+            insertbackground=T.FG,
+            highlightbackground=T.BORDER,
+            highlightthickness=1,
+            borderwidth=0,
+            font=T.FONT,
         )
 
         self.hash_status = tk.StringVar(value="")
-        ttk.Label(frame, textvariable=self.hash_status).grid(
+        ttk.Label(frame, textvariable=self.hash_status, style="Hint.TLabel").grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(4, 0)
         )
 
-        RoundedButton(frame, text="Calcular", command=self.compute_hashes).grid(
-            row=5, column=1, sticky="e", pady=10
+        self.hash_progress = ttk.Progressbar(frame, mode="determinate", maximum=100)
+        self.hash_progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        self.hash_progress.grid_remove()
+
+        self.btn_hash_calc = RoundedButton(frame, text="Calcular", command=self.compute_hashes)
+        self.btn_hash_calc.grid(row=6, column=1, sticky="e", pady=10)
+
+        ttk.Label(frame, text="Resultados", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(8, 4)
         )
 
         self.hash_md5 = tk.StringVar()
@@ -380,9 +430,11 @@ class CryptoApp:
         self.hash_sha256 = tk.StringVar()
         for i, (lab, var) in enumerate(
             [("MD5", self.hash_md5), ("SHA-1", self.hash_sha1), ("SHA-256", self.hash_sha256)],
-            start=6,
+            start=8,
         ):
-            ttk.Label(frame, text=lab + ":").grid(row=i, column=0, sticky="w", pady=4)
+            ttk.Label(frame, text=lab, style="Bold.TLabel", font=T.FONT_BOLD).grid(
+                row=i, column=0, sticky="w", pady=4
+            )
             ent = ttk.Entry(frame, textvariable=var)
             ent.grid(row=i, column=1, sticky="ew", padx=4, pady=4)
             RoundedButton(
@@ -396,17 +448,17 @@ class CryptoApp:
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Generador de contraseñas", font=("DejaVu Sans", 12, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w"
-        )
-        ttk.Label(
+        page_header(
             frame,
-            text="Aleatoria segura (CSPRNG). Contraseña alfanumérica o frase de palabras. "
+            "Generador de contraseñas",
+            "Aleatoria segura (CSPRNG). Contraseña alfanumérica o frase de palabras. "
             "Entropía ≈ length × log₂(alfabeto). Objetivo práctico: ≥ 80 bits.",
-            wraplength=700,
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 12))
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
 
         self.gen_mode = tk.StringVar(value="password")
+        ttk.Label(frame, text="Tipo", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(0, 4)
+        )
         modes = ttk.Frame(frame)
         modes.grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Radiobutton(
@@ -426,7 +478,7 @@ class CryptoApp:
         self.gen_opts = ttk.Frame(frame)
         self.gen_opts.grid(row=3, column=0, columnspan=3, sticky="ew", pady=4)
 
-        self.lbl_gen_len = ttk.Label(self.gen_opts, text="Longitud:")
+        self.lbl_gen_len = ttk.Label(self.gen_opts, text="Longitud", style="Bold.TLabel", font=T.FONT_BOLD)
         self.spin_gen_len = ttk.Spinbox(
             self.gen_opts, from_=8, to=128, textvariable=self.gen_length, width=6
         )
@@ -435,7 +487,7 @@ class CryptoApp:
         self.chk_digits = ttk.Checkbutton(self.gen_opts, text="0-9", variable=self.gen_digits)
         self.chk_symbols = ttk.Checkbutton(self.gen_opts, text="Símbolos", variable=self.gen_symbols)
 
-        self.lbl_gen_words = ttk.Label(self.gen_opts, text="Palabras:")
+        self.lbl_gen_words = ttk.Label(self.gen_opts, text="Palabras", style="Bold.TLabel", font=T.FONT_BOLD)
         self.spin_gen_words = ttk.Spinbox(
             self.gen_opts, from_=4, to=12, textvariable=self.gen_words, width=6
         )
@@ -446,15 +498,17 @@ class CryptoApp:
 
         self.gen_result = tk.StringVar()
         self.gen_entropy = tk.StringVar(value="")
-        ttk.Label(frame, text="Resultado:").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Label(frame, text="Resultado", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(8, 4)
+        )
         ttk.Entry(frame, textvariable=self.gen_result).grid(
-            row=5, column=1, sticky="ew", padx=4, pady=4
+            row=6, column=0, columnspan=2, sticky="ew", padx=(0, 4), pady=4
         )
         RoundedButton(frame, text="Copiar", command=lambda: self._copy_hash(self.gen_result.get())).grid(
-            row=5, column=2, padx=4
+            row=6, column=2, padx=4
         )
-        ttk.Label(frame, textvariable=self.gen_entropy).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=(4, 0)
+        ttk.Label(frame, textvariable=self.gen_entropy, style="Hint.TLabel").grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(4, 0)
         )
 
         self._toggle_gen_mode()
@@ -522,6 +576,8 @@ class CryptoApp:
             self.hash_text.grid(row=3, column=1, columnspan=2, sticky="ew", padx=4, pady=4)
 
     def _browse_hash_target(self):
+        if getattr(self, "_hash_busy", False):
+            return
         mode = self.hash_mode.get()
         if mode == "folder":
             path = filedialog.askdirectory(title="Seleccionar carpeta")
@@ -537,49 +593,147 @@ class CryptoApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(value)
 
+    def _set_hash_busy(self, busy: bool):
+        self._hash_busy = busy
+        state = "disabled" if busy else "normal"
+        self.btn_hash_calc.config(state=state)
+        self.btn_hash_browse.config(state=state)
+        for rb in (self.hash_radio_file, self.hash_radio_folder, self.hash_radio_text):
+            rb.config(state=state)
+        self.entry_hash_path.config(state=state)
+        self.hash_text.config(state=state)
+        if busy:
+            self.hash_progress.grid()
+            self.hash_progress.configure(mode="indeterminate", value=0)
+            self.hash_progress.start(12)
+        else:
+            self.hash_progress.stop()
+            self.hash_progress.configure(mode="determinate", value=0)
+            self.hash_progress.grid_remove()
+
+    def _hash_set_progress(self, done: int, total: int, label: str = ""):
+        total = max(total, 1)
+        pct = min(100, int(100 * done / total))
+        if str(self.hash_progress.cget("mode")) != "determinate":
+            self.hash_progress.stop()
+            self.hash_progress.configure(mode="determinate", maximum=100)
+        self.hash_progress["value"] = pct
+        if label:
+            self.hash_status.set(f"{label} — {pct}%")
+        else:
+            self.hash_status.set(f"Calculando… {pct}%")
+
     def compute_hashes(self):
-        try:
-            mode = self.hash_mode.get()
-            self.hash_status.set("Calculando…")
-            self.root.update_idletasks()
-            if mode == "file":
-                path = self.hash_path.get().strip()
-                if not path:
-                    messagebox.showerror("Error", "Selecciona un archivo")
+        if getattr(self, "_hash_busy", False):
+            return
+
+        mode = self.hash_mode.get()
+        path = ""
+        text = ""
+        if mode == "file":
+            path = self.hash_path.get().strip()
+            if not path:
+                messagebox.showerror("Error", "Selecciona un archivo")
+                return
+            if not os.path.isfile(path):
+                messagebox.showerror("Error", f"No es un archivo:\n{path}")
+                return
+        elif mode == "folder":
+            path = self.hash_path.get().strip()
+            if not path:
+                messagebox.showerror("Error", "Selecciona una carpeta")
+                return
+            if not os.path.isdir(path):
+                messagebox.showerror("Error", f"No es una carpeta:\n{path}")
+                return
+        else:
+            text = self.hash_text.get("1.0", tk.END)
+            if text.endswith("\n"):
+                text = text[:-1]
+
+        import threading
+        import queue
+
+        self._set_hash_busy(True)
+        self.hash_status.set("Calculando…")
+        self.hash_md5.set("")
+        self.hash_sha1.set("")
+        self.hash_sha256.set("")
+        q: queue.Queue = queue.Queue()
+
+        def on_progress(done, total):
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put(("prog", done, total))
+
+        def work():
+            err = None
+            result = None
+            status = ""
+            try:
+                if mode == "file":
+                    result = self.service.hash_file(path, progress=on_progress)
+                    status = f"Archivo: {os.path.basename(path)}"
+                elif mode == "folder":
+                    result = self.service.hash_directory(path, progress=on_progress)
+                    status = (
+                        f"Carpeta: {result['files']} archivo(s) — hash del manifiesto ordenado"
+                    )
+                else:
+                    data = text.encode("utf-8")
+                    on_progress(0, 1)
+                    result = self.service.hash_bytes(data)
+                    on_progress(1, 1)
+                    status = f"Texto: {len(data)} bytes"
+            except Exception as e:
+                err = e
+            q.put(("done", err, result, status))
+
+        def poll():
+            finished = False
+            err = None
+            result = None
+            status = ""
+            latest = None
+            try:
+                while True:
+                    item = q.get_nowait()
+                    if item[0] == "done":
+                        finished = True
+                        err = item[1]
+                        result = item[2]
+                        status = item[3]
+                    elif item[0] == "prog":
+                        latest = (item[1], item[2])
+            except queue.Empty:
+                pass
+
+            if latest is not None and not finished:
+                done, total = latest
+                if mode == "folder":
+                    self._hash_set_progress(done, total, f"Archivo {done}/{total}")
+                else:
+                    self._hash_set_progress(done, total)
+
+            if finished:
+                self._set_hash_busy(False)
+                if err:
                     self.hash_status.set("")
+                    messagebox.showerror("Error", str(err))
                     return
-                if not os.path.isfile(path):
-                    messagebox.showerror("Error", f"No es un archivo:\n{path}")
-                    self.hash_status.set("")
-                    return
-                result = self.service.hash_file(path)
-                self.hash_status.set(f"Archivo: {os.path.basename(path)}")
-            elif mode == "folder":
-                path = self.hash_path.get().strip()
-                if not path:
-                    messagebox.showerror("Error", "Selecciona una carpeta")
-                    self.hash_status.set("")
-                    return
-                if not os.path.isdir(path):
-                    messagebox.showerror("Error", f"No es una carpeta:\n{path}")
-                    self.hash_status.set("")
-                    return
-                result = self.service.hash_directory(path)
-                self.hash_status.set(
-                    f"Carpeta: {result['files']} archivo(s) — hash del manifiesto ordenado"
-                )
-            else:
-                text = self.hash_text.get("1.0", tk.END)
-                if text.endswith("\n"):
-                    text = text[:-1]
-                result = self.service.hash_bytes(text.encode("utf-8"))
-                self.hash_status.set(f"Texto: {len(text.encode('utf-8'))} bytes")
-            self.hash_md5.set(result["md5"])
-            self.hash_sha1.set(result["sha1"])
-            self.hash_sha256.set(result["sha256"])
-        except Exception as e:
-            self.hash_status.set("")
-            messagebox.showerror("Error", str(e))
+                self.hash_md5.set(result["md5"])
+                self.hash_sha1.set(result["sha1"])
+                self.hash_sha256.set(result["sha256"])
+                self.hash_status.set(status)
+                return
+
+            self.root.after(80, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(80, poll)
 
     def setup_keys_tab(self):
         frame = ttk.Frame(self.tab_keys, padding="20")
@@ -587,10 +741,17 @@ class CryptoApp:
 
         from domain.paths import get_workspace, cipher_dir, plain_dir
 
+        page_header(
+            frame,
+            "Claves de la bóveda",
+            "Huellas de frases guardadas y rutas de trabajo de esta sesión.",
+        ).pack(anchor="w", fill="x", pady=(0, 12))
+
         ttk.Label(
             frame,
             text=f"Bóveda activa: {self.service.vault.name}",
-            font=("DejaVu Sans", 11, "bold"),
+            style="Heading.TLabel",
+            font=T.FONT_SUB,
         ).pack(anchor="w", pady=(0, 4))
         ttk.Label(
             frame,
@@ -598,7 +759,11 @@ class CryptoApp:
             f"Cifrados → {cipher_dir()}\n"
             f"Descifrados → {plain_dir()}",
             style="Hint.TLabel",
-        ).pack(anchor="w", pady=(0, 8))
+        ).pack(anchor="w", pady=(0, 10))
+
+        ttk.Label(frame, text="Claves guardadas", style="Heading.TLabel", font=T.FONT_SUB).pack(
+            anchor="w", pady=(0, 6)
+        )
 
         columns = ("ID", "Hash", "Extension")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings")
@@ -802,14 +967,17 @@ class CryptoApp:
 
         ttk.Label(
             frame,
-            text="Cápsulas temporales (offline, complementarios)",
-            font=("DejaVu Sans", 12, "bold"),
+            text="Cápsulas temporales",
+            style="Page.TLabel",
+            font=T.FONT_PAGE,
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             frame,
             text="1) Tiempo a bloquear: espera de calendario hasta poder abrir (reloj del PC).\n"
-            "2) Tiempo de descifrado: al Resolver, la CPU trabaja esos min/seg (puzzle). "
-            "Puedes usar uno, el otro, o ambos.",
+            "2) Tiempo de descifrado: al Resolver, la CPU trabaja esos min/seg (puzzle).\n"
+            "3) Contraseña (opcional): tras calendario/puzzle, pide clave para descifrar. "
+            "Puedes combinar las tres capas.",
+            style="Hint.TLabel",
             wraplength=760,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
@@ -822,17 +990,21 @@ class CryptoApp:
         form.grid(row=0, column=0, sticky="nsw")
         form.columnconfigure(1, weight=1)
 
-        ttk.Label(form, text="Archivo:").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Label(form, text="Archivo", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=3
+        )
         self.cap_file = tk.StringVar()
         ttk.Entry(form, textvariable=self.cap_file, width=28).grid(row=0, column=1, sticky="ew", padx=4)
         RoundedButton(form, text="…", padx=10, pady=6, command=self._browse_capsule_file).grid(row=0, column=2)
 
-        ttk.Label(form, text="Etiqueta:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(form, text="Etiqueta", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="w", pady=3
+        )
         self.cap_label = tk.StringVar()
         ttk.Entry(form, textvariable=self.cap_label).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
 
-        ttk.Label(form, text="Tiempo a bloquear", font=("DejaVu Sans", 10, "bold")).grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(10, 2)
+        ttk.Label(form, text="Tiempo a bloquear", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(14, 2)
         )
         ttk.Label(
             form, text="Espera hasta esa fecha antes de poder Resolver/Desbloquear.", style="Hint.TLabel"
@@ -855,8 +1027,8 @@ class CryptoApp:
             ttk.Label(lock_row, text=lab).grid(row=0, column=i)
             ttk.Entry(lock_row, textvariable=var, width=5).grid(row=1, column=i, padx=2)
 
-        ttk.Label(form, text="Tiempo de descifrado", font=("DejaVu Sans", 10, "bold")).grid(
-            row=5, column=0, columnspan=3, sticky="w", pady=(10, 2)
+        ttk.Label(form, text="Tiempo de descifrado", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(14, 2)
         )
         ttk.Label(
             form, text="Trabajo de CPU al Resolver (máx. 60 min). 0 = solo calendario.", style="Hint.TLabel"
@@ -881,15 +1053,34 @@ class CryptoApp:
             form, text="Borrar original tras cifrar", variable=self.cap_del_orig
         ).grid(row=8, column=1, columnspan=2, sticky="w", pady=6)
 
+        self.cap_use_pw = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            form,
+            text="Requerir contraseña al abrir (opcional)",
+            variable=self.cap_use_pw,
+            command=self._toggle_cap_password,
+        ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(8, 2))
+
+        self.cap_pw = tk.StringVar()
+        self.cap_pw2 = tk.StringVar()
+        self.lbl_cap_pw = ttk.Label(form, text="Contraseña", style="Bold.TLabel", font=T.FONT_BOLD)
+        self.entry_cap_pw = ttk.Entry(form, textvariable=self.cap_pw, show="*")
+        self.lbl_cap_pw2 = ttk.Label(form, text="Repetir", style="Bold.TLabel", font=T.FONT_BOLD)
+        self.entry_cap_pw2 = ttk.Entry(form, textvariable=self.cap_pw2, show="*")
+        self._toggle_cap_password()
+
         RoundedButton(form, text="Crear cápsula", command=self.create_capsule).grid(
-            row=9, column=1, sticky="e", pady=10
+            row=12, column=1, sticky="e", pady=10
         )
 
         right = ttk.Frame(body, padding=8)
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
 
+        ttk.Label(right, text="Tus cápsulas", style="Heading.TLabel", font=T.FONT_SUB).grid(
+            row=0, column=0, sticky="w", pady=(0, 6)
+        )
         cols = ("id", "label", "bloqueo", "descifrado", "path")
         self.cap_tree = ttk.Treeview(right, columns=cols, show="headings", height=10)
         self.cap_tree.heading("id", text="ID")
@@ -902,11 +1093,11 @@ class CryptoApp:
         self.cap_tree.column("bloqueo", width=110)
         self.cap_tree.column("descifrado", width=90)
         self.cap_tree.column("path", width=180)
-        self.cap_tree.grid(row=0, column=0, sticky="nsew")
+        self.cap_tree.grid(row=1, column=0, sticky="nsew")
         self.cap_tree.bind("<<TreeviewSelect>>", self._on_capsule_select)
 
         anim = ttk.Frame(right)
-        anim.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        anim.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.cap_timer_canvas = tk.Canvas(
             anim, width=96, height=96, bg=T.BG, highlightthickness=0
         )
@@ -915,14 +1106,14 @@ class CryptoApp:
         self.cap_timer_sub = tk.StringVar(value="")
         txt = ttk.Frame(anim)
         txt.pack(side="left", fill="x", expand=True)
-        ttk.Label(txt, textvariable=self.cap_timer_text, font=("DejaVu Sans", 16, "bold")).pack(
+        ttk.Label(txt, textvariable=self.cap_timer_text, style="Timer.TLabel", font=T.FONT_TIMER).pack(
             anchor="w"
         )
         ttk.Label(txt, textvariable=self.cap_timer_sub, style="Hint.TLabel").pack(anchor="w")
         self._cap_anim_totals = {}
 
         btns = ttk.Frame(right)
-        btns.grid(row=2, column=0, sticky="ew", pady=8)
+        btns.grid(row=3, column=0, sticky="ew", pady=8)
         self.btn_unlock_cap = RoundedButton(
             btns, text="Resolver / Desbloquear", command=self.unlock_selected_capsule, state="disabled"
         )
@@ -939,6 +1130,20 @@ class CryptoApp:
         if path:
             self.cap_file.set(path)
 
+    def _toggle_cap_password(self):
+        if self.cap_use_pw.get():
+            self.lbl_cap_pw.grid(row=10, column=0, sticky="w", pady=2)
+            self.entry_cap_pw.grid(row=10, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+            self.lbl_cap_pw2.grid(row=11, column=0, sticky="w", pady=2)
+            self.entry_cap_pw2.grid(row=11, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+        else:
+            self.lbl_cap_pw.grid_remove()
+            self.entry_cap_pw.grid_remove()
+            self.lbl_cap_pw2.grid_remove()
+            self.entry_cap_pw2.grid_remove()
+            self.cap_pw.set("")
+            self.cap_pw2.set("")
+
     def _parse_int(self, var, name):
         try:
             v = int(var.get().strip() or "0")
@@ -953,15 +1158,25 @@ class CryptoApp:
 
         return is_puzzle(cap.key)
 
-    def _cap_decrypt_label(self, cap) -> str:
-        if not self._cap_is_puzzle(cap):
-            return "inmediato"
-        import json
+    def _cap_needs_password(self, cap) -> bool:
+        from domain.timelock import needs_password
 
-        try:
-            return self._fmt_cpu(int(json.loads(cap.key).get("secs", 0)))
-        except Exception:
-            return "puzzle"
+        return needs_password(cap.key)
+
+    def _cap_decrypt_label(self, cap) -> str:
+        parts = []
+        if self._cap_is_puzzle(cap):
+            import json
+
+            try:
+                parts.append(self._fmt_cpu(int(json.loads(cap.key).get("secs", 0))))
+            except Exception:
+                parts.append("puzzle")
+        else:
+            parts.append("inmediato")
+        if self._cap_needs_password(cap):
+            parts.append("+ clave")
+        return " ".join(parts)
 
     def _cap_lock_label(self, cap) -> str:
         label, ready, _ = self._format_cal_remaining(cap.unlock_at)
@@ -1001,8 +1216,17 @@ class CryptoApp:
         if not path:
             messagebox.showerror("Error", "Selecciona un archivo")
             return
+        password = None
+        if self.cap_use_pw.get():
+            password = self.cap_pw.get()
+            if password != self.cap_pw2.get():
+                messagebox.showerror("Error", "Las contraseñas no coinciden")
+                return
+            if len(password) < 8:
+                messagebox.showerror("Error", "La contraseña debe tener al menos 8 caracteres")
+                return
         try:
-            cid, unlock_at, bros, lock_secs, dec_secs = self.service.create_time_capsule(
+            cid, unlock_at, bros, lock_secs, dec_secs, use_pw = self.service.create_time_capsule(
                 file_path=path,
                 label=self.cap_label.get(),
                 years=self._parse_int(self.cap_years, "Años"),
@@ -1012,6 +1236,7 @@ class CryptoApp:
                 decrypt_minutes=self._parse_int(self.cap_dec_mins, "Min descifrado"),
                 decrypt_seconds=self._parse_int(self.cap_dec_secs, "Seg descifrado"),
                 delete_original=self.cap_del_orig.get(),
+                password=password,
             )
             parts = [f"ID {cid}"]
             if lock_secs > 0:
@@ -1022,11 +1247,17 @@ class CryptoApp:
                 parts.append(f"Descifrado: {self._fmt_cpu(dec_secs)} al Resolver")
             else:
                 parts.append("Descifrado: inmediato (sin puzzle)")
+            if use_pw:
+                parts.append("Contraseña: sí (se pedirá tras calendario/puzzle)")
+            else:
+                parts.append("Contraseña: no")
             parts.append(f"Archivo:\n{bros}")
             messagebox.showinfo("Cápsula creada", "\n\n".join(parts))
             if lock_secs > 0:
                 self._cap_anim_totals[cid] = max(lock_secs, 1.0)
             self.cap_file.set("")
+            self.cap_pw.set("")
+            self.cap_pw2.set("")
             self.refresh_capsules()
             if self.cap_tree.exists(str(cid)):
                 self.cap_tree.selection_set(str(cid))
@@ -1086,14 +1317,17 @@ class CryptoApp:
 
         # calendario cumplido
         c.create_oval(x0, y0, x1, y1, outline=T.OK, width=8)
+        pw_note = " · luego contraseña" if self._cap_needs_password(cap) else ""
         if self._cap_is_puzzle(cap):
             c.create_text(size // 2, size // 2, text="▶", fill=T.OK, font=("DejaVu Sans", 28, "bold"))
             self.cap_timer_text.set("Listo para Resolver")
-            self.cap_timer_sub.set(f"Descifrado: {dec}")
+            self.cap_timer_sub.set(f"Descifrado: {dec}{pw_note}")
         else:
             c.create_text(size // 2, size // 2, text="✓", fill=T.OK, font=("DejaVu Sans", 28, "bold"))
             self.cap_timer_text.set("LISTO")
-            self.cap_timer_sub.set("Desbloqueo inmediato")
+            self.cap_timer_sub.set(
+                "Desbloqueo inmediato" + (" · pide contraseña" if self._cap_needs_password(cap) else "")
+            )
 
     def refresh_capsules(self):
         if not hasattr(self, "cap_tree"):
@@ -1154,6 +1388,39 @@ class CryptoApp:
         if not unlocking:
             self._draw_cap_timer(cap)
 
+    def _ask_capsule_password(self) -> str | None:
+        from tkinter import simpledialog
+
+        return simpledialog.askstring(
+            "Contraseña de la cápsula",
+            "Introduce la contraseña para descifrar:",
+            show="*",
+            parent=self.root,
+        )
+
+    def _finish_capsule_open(self, cid: int, secret: str) -> None:
+        from domain.timelock import is_password_wrap
+
+        password = None
+        if is_password_wrap(secret):
+            password = self._ask_capsule_password()
+            if not password:
+                messagebox.showinfo(
+                    "Cancelado",
+                    "Se liberó el tiempo/puzzle, pero falta la contraseña para descifrar.",
+                )
+                self._on_capsule_select()
+                return
+        try:
+            out = self.service.open_capsule_with_secret(cid, secret, password=password)
+            messagebox.showinfo("Listo", f"Cápsula desbloqueada.\nArchivo:\n{out}")
+            if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
+                self.service.delete_capsule(cid)
+            self.refresh_capsules()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self._on_capsule_select()
+
     def unlock_selected_capsule(self):
         import threading
         import queue
@@ -1172,14 +1439,11 @@ class CryptoApp:
             messagebox.showerror("Bloqueada", f"Aún no: espera hasta\n{cap.unlock_at}")
             return
 
-        # Solo calendario (sin puzzle)
+        # Solo calendario (sin puzzle): pide contraseña si aplica y abre
         if not is_puzzle(cap.key):
             try:
-                out = self.service.unlock_capsule(cid)
-                messagebox.showinfo("Listo", f"Cápsula desbloqueada.\nArchivo:\n{out}")
-                if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
-                    self.service.delete_capsule(cid)
-                self.refresh_capsules()
+                secret = self.service.release_capsule_secret(cid)
+                self._finish_capsule_open(cid, secret)
             except Exception as e:
                 messagebox.showerror("Error", str(e))
             return
@@ -1199,17 +1463,17 @@ class CryptoApp:
 
         def work():
             err = None
-            out = None
+            secret = None
             try:
-                out = self.service.unlock_capsule(cid, progress=on_progress)
+                secret = self.service.release_capsule_secret(cid, progress=on_progress)
             except Exception as e:
                 err = e
-            q.put(("done", err, out))
+            q.put(("done", err, secret))
 
         def poll():
             finished = False
             err = None
-            out = None
+            secret = None
             latest = None
             try:
                 while True:
@@ -1217,7 +1481,7 @@ class CryptoApp:
                     if item[0] == "done":
                         finished = True
                         err = item[1]
-                        out = item[2]
+                        secret = item[2]
                     elif item[0] == "prog":
                         latest = (item[1], item[2])
             except queue.Empty:
@@ -1235,10 +1499,7 @@ class CryptoApp:
                     self._on_capsule_select()
                     return
                 self._draw_cap_timer(None, frac=1.0, status="LISTO")
-                messagebox.showinfo("Listo", f"Cápsula desbloqueada.\nArchivo:\n{out}")
-                if messagebox.askyesno("Limpiar", "¿Eliminar esta cápsula de la lista?"):
-                    self.service.delete_capsule(cid)
-                self.refresh_capsules()
+                self._finish_capsule_open(cid, secret)
                 return
 
             self.root.after(100, poll)
@@ -1261,20 +1522,41 @@ class CryptoApp:
     # --- Messaging Tab ---
     def setup_messages_tab(self):
         """Setup for the Secure Messages Tab"""
-        frame = ttk.Frame(self.tab_messages, padding="10")
+        outer = ttk.Frame(self.tab_messages, padding="10")
+        outer.pack(fill="both", expand=True)
+
+        page_header(
+            outer,
+            "Notas cifradas",
+            "Cada nota se cifra con su propia contraseña y se guarda en la bóveda.",
+        ).pack(anchor="w", fill="x", pady=(0, 10))
+
+        frame = ttk.Frame(outer)
         frame.pack(fill="both", expand=True)
-        
+
         # Split into Left (List) and Right (Details)
         left_panel = ttk.Frame(frame)
         left_panel.pack(side="left", fill="y", padx=(0, 10))
-        
+
         right_panel = ttk.Frame(frame)
         right_panel.pack(side="left", fill="both", expand=True)
-        
+
         # -- Left Panel: Message List --
-        ttk.Label(left_panel, text="Notas guardadas").pack(pady=5)
-        
-        self.msg_listbox = tk.Listbox(left_panel, bg=T.SURFACE, fg=T.FG, selectbackground=T.SELECT, selectforeground=T.SELECT_FG, borderwidth=1, highlightthickness=1, highlightbackground=T.BORDER)
+        ttk.Label(
+            left_panel, text="Notas guardadas", style="Heading.TLabel", font=T.FONT_SUB
+        ).pack(anchor="w", pady=(0, 6))
+
+        self.msg_listbox = tk.Listbox(
+            left_panel,
+            bg=T.SURFACE,
+            fg=T.FG,
+            selectbackground=T.SELECT,
+            selectforeground=T.SELECT_FG,
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground=T.BORDER,
+            font=T.FONT,
+        )
         self.msg_listbox.pack(fill="both", expand=True, pady=5)
         self.msg_listbox.bind('<<ListboxSelect>>', self.on_message_select)
         
@@ -1293,22 +1575,40 @@ class CryptoApp:
         """Muestra el formulario para crear un mensaje nuevo."""
         self.clear_right_panel()
         
-        lbl = ttk.Label(self.right_container, text="Nueva nota cifrada", font=("DejaVu Sans", 12, "bold"))
-        lbl.pack(pady=10)
-        
+        lbl = ttk.Label(
+            self.right_container, text="Nueva nota cifrada", style="Page.TLabel", font=T.FONT_PAGE
+        )
+        lbl.pack(anchor="w", pady=(4, 12))
+
         form_frame = ttk.Frame(self.right_container)
         form_frame.pack(fill="both", expand=True, padx=20)
         form_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(form_frame, text="Título:").grid(row=0, column=0, sticky="w", pady=5)
+
+        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
         self.new_msg_title = tk.StringVar()
         ttk.Entry(form_frame, textvariable=self.new_msg_title).grid(row=0, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(form_frame, text="Mensaje:").grid(row=1, column=0, sticky="nw", pady=5)
-        self.new_msg_content = tk.Text(form_frame, height=10, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG, highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0)
+
+        ttk.Label(form_frame, text="Mensaje", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="nw", pady=5
+        )
+        self.new_msg_content = tk.Text(
+            form_frame,
+            height=10,
+            bg=T.SURFACE,
+            fg=T.FG,
+            insertbackground=T.FG,
+            highlightbackground=T.BORDER,
+            highlightthickness=1,
+            borderwidth=0,
+            font=T.FONT,
+        )
         self.new_msg_content.grid(row=1, column=1, sticky="ew", pady=5)
-        
-        ttk.Label(form_frame, text="Contraseña de cifrado:").grid(row=2, column=0, sticky="w", pady=5)
+
+        ttk.Label(form_frame, text="Contraseña de cifrado", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=2, column=0, sticky="w", pady=5
+        )
         self.new_msg_pass = tk.StringVar()
         ttk.Entry(form_frame, textvariable=self.new_msg_pass, show="*").grid(row=2, column=1, sticky="ew", pady=5)
         
@@ -1324,14 +1624,17 @@ class CryptoApp:
         ttk.Label(
             self.right_container,
             text=message_obj.title,
-            font=("DejaVu Sans", 12, "bold"),
-        ).pack(pady=(10, 4))
+            style="Page.TLabel",
+            font=T.FONT_PAGE,
+        ).pack(anchor="w", pady=(4, 12))
 
         form_frame = ttk.Frame(self.right_container)
         form_frame.pack(fill="both", expand=True, padx=20)
         form_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(form_frame, text="Contraseña de la nota:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(form_frame, text="Contraseña de la nota", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
         self.view_msg_pass = tk.StringVar()
         ent = ttk.Entry(form_frame, textvariable=self.view_msg_pass, show="*")
         ent.grid(row=0, column=1, sticky="ew", pady=5)
@@ -1342,7 +1645,9 @@ class CryptoApp:
             row=0, column=2, padx=10
         )
 
-        ttk.Label(form_frame, text="Título:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="w", pady=5
+        )
         self.edit_msg_title = tk.StringVar(value=message_obj.title)
         self.edit_title_entry = ttk.Entry(
             form_frame, textvariable=self.edit_msg_title, state="disabled"
@@ -1360,6 +1665,7 @@ class CryptoApp:
             highlightthickness=1,
             highlightbackground=T.BORDER,
             wrap="word",
+            font=T.FONT,
         )
         self.lbl_decrypted_content.grid(row=2, column=0, columnspan=3, sticky="nsew", pady=12)
         form_frame.rowconfigure(2, weight=1)

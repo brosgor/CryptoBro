@@ -35,15 +35,19 @@ class UnlockDialog:
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="CryptoBro", font=T.FONT_TITLE).pack(pady=(0, 4))
+        ttk.Label(frame, text="CryptoBro", style="Title.TLabel", font=T.FONT_TITLE).pack(
+            anchor="w", pady=(0, 2)
+        )
         self.ws_label = ttk.Label(frame, text="", style="Hint.TLabel")
-        self.ws_label.pack(pady=(0, 8))
+        self.ws_label.pack(anchor="w", pady=(0, 12))
 
         RoundedButton(
             frame, text="Elegir carpeta de trabajo…", command=self._pick_workspace
         ).pack(fill="x", pady=3)
 
-        ttk.Label(frame, text="Bóveda").pack(anchor="w", pady=(10, 0))
+        ttk.Label(frame, text="Bóveda", style="Heading.TLabel", font=T.FONT_SUB).pack(
+            anchor="w", pady=(14, 4)
+        )
         self.vault_var = tk.StringVar()
         self.combo = ttk.Combobox(frame, textvariable=self.vault_var, state="readonly")
         self.combo.pack(fill="x", pady=4)
@@ -54,7 +58,7 @@ class UnlockDialog:
         self.name_new = tk.StringVar()
 
         self.form = ttk.Frame(frame)
-        self.form.pack(fill="both", expand=True, pady=10)
+        self.form.pack(fill="both", expand=True, pady=(12, 10))
 
         self.actions = ttk.Frame(frame)
         self.actions.pack(fill="x", pady=6)
@@ -112,6 +116,7 @@ class UnlockDialog:
             ttk.Label(
                 self.form,
                 text="No hay bóvedas — crea una en esta carpeta",
+                style="Heading.TLabel",
                 font=T.FONT_SUB,
             ).pack(anchor="w", pady=(0, 8))
             self._build_create_fields(default_name="personal")
@@ -121,9 +126,11 @@ class UnlockDialog:
             return
 
         ttk.Label(
-            self.form, text=f"Desbloquear «{selected}»", font=T.FONT_SUB
+            self.form, text=f"Desbloquear «{selected}»", style="Heading.TLabel", font=T.FONT_SUB
         ).pack(anchor="w", pady=(0, 8))
-        ttk.Label(self.form, text="Clave de bloqueo").pack(anchor="w")
+        ttk.Label(self.form, text="Clave de bloqueo", style="Bold.TLabel", font=T.FONT_BOLD).pack(
+            anchor="w"
+        )
         ent = ttk.Entry(self.form, textvariable=self.pw, show="*")
         ent.pack(fill="x", pady=2)
         ent.focus_set()
@@ -133,19 +140,25 @@ class UnlockDialog:
         )
 
     def _build_create_fields(self, default_name: str = ""):
-        ttk.Label(self.form, text="Nombre de la bóveda").pack(anchor="w")
+        ttk.Label(self.form, text="Nombre de la bóveda", style="Bold.TLabel", font=T.FONT_BOLD).pack(
+            anchor="w"
+        )
         self.name_new.set(default_name)
         ttk.Entry(self.form, textvariable=self.name_new).pack(fill="x", pady=2)
-        ttk.Label(self.form, text="Clave de bloqueo (mín. 8)").pack(anchor="w", pady=(8, 0))
+        ttk.Label(
+            self.form, text="Clave de bloqueo (mín. 8)", style="Bold.TLabel", font=T.FONT_BOLD
+        ).pack(anchor="w", pady=(8, 0))
         ttk.Entry(self.form, textvariable=self.pw, show="*").pack(fill="x", pady=2)
-        ttk.Label(self.form, text="Confirmar clave").pack(anchor="w", pady=(8, 0))
+        ttk.Label(self.form, text="Confirmar clave", style="Bold.TLabel", font=T.FONT_BOLD).pack(
+            anchor="w", pady=(8, 0)
+        )
         ent2 = ttk.Entry(self.form, textvariable=self.pw2, show="*")
         ent2.pack(fill="x", pady=2)
         ent2.bind("<Return>", lambda e: self._create())
 
     def _show_create(self):
         self._clear_form()
-        ttk.Label(self.form, text="Nueva bóveda", font=T.FONT_SUB).pack(
+        ttk.Label(self.form, text="Nueva bóveda", style="Heading.TLabel", font=T.FONT_SUB).pack(
             anchor="w", pady=(0, 8)
         )
         ttk.Label(

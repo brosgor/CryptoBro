@@ -2,6 +2,8 @@
 
 Creación rápida con trampa RSA (se descarta). Desbloqueo ≈ duración estimada de CPU.
 No usa reloj ni red. CPU más rápida = desbloquea antes (límite inherente del TLP).
+
+Capa opcional: envolver la clave con contraseña (PBKDF2 + Fernet) tras el puzzle.
 """
 
 from __future__ import annotations
@@ -13,8 +15,13 @@ import secrets
 import time
 from typing import Callable, Optional
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+_PW_KIND = "pw"
+_PBKDF2_ITERS = 200_000
 
 
 def _benchmark_squarings(n: int, sample_ms: float = 80.0) -> float:
@@ -28,7 +35,54 @@ def _benchmark_squarings(n: int, sample_ms: float = 80.0) -> float:
     return max(count / elapsed, 1.0)
 
 
-def seal(plaintext_key: str, duration_seconds: float) -> dict:
+def wrap_key_with_password(plaintext_key: str, password: str) -> str:
+    """Envuelve la clave del .bros con una contraseña (opcional en cápsulas)."""
+    if len(password) < 8:
+        raise ValueError("La contraseña de la cápsula debe tener al menos 8 caracteres")
+    salt = secrets.token_bytes(16)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=_PBKDF2_ITERS,
+    )
+    fkey = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+    wrapped = Fernet(fkey).encrypt(plaintext_key.encode("utf-8")).decode("ascii")
+    return json.dumps(
+        {"v": 1, "kind": _PW_KIND, "salt": salt.hex(), "wrap": wrapped},
+        separators=(",", ":"),
+    )
+
+
+def is_password_wrap(blob: str) -> bool:
+    if not blob or blob[0] != "{":
+        return False
+    try:
+        data = json.loads(blob)
+        return data.get("v") == 1 and data.get("kind") == _PW_KIND and "wrap" in data
+    except Exception:
+        return False
+
+
+def unwrap_key_with_password(blob: str, password: str) -> str:
+    data = json.loads(blob) if isinstance(blob, str) else blob
+    if data.get("kind") != _PW_KIND:
+        raise ValueError("No es un envoltorio de contraseña")
+    salt = bytes.fromhex(data["salt"])
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=_PBKDF2_ITERS,
+    )
+    fkey = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+    try:
+        return Fernet(fkey).decrypt(data["wrap"].encode("ascii")).decode("utf-8")
+    except InvalidToken as e:
+        raise ValueError("Contraseña incorrecta") from e
+
+
+def seal(plaintext_key: str, duration_seconds: float, password_protected: bool = False) -> dict:
     """Envuelve la clave en un puzzle. duration_seconds → T squarings (estimado)."""
     if duration_seconds <= 0:
         raise ValueError("Duración debe ser > 0")
@@ -52,7 +106,7 @@ def seal(plaintext_key: str, duration_seconds: float) -> dict:
     wrapped = Fernet(fkey).encrypt(plaintext_key.encode("utf-8")).decode("ascii")
 
     # no guardar p, q, phi
-    return {
+    out = {
         "v": 1,
         "n": str(n),
         "a": str(a0),
@@ -61,10 +115,18 @@ def seal(plaintext_key: str, duration_seconds: float) -> dict:
         "secs": int(duration_seconds),
         "rate": int(rate),
     }
+    if password_protected:
+        out["pw"] = 1
+    return out
 
 
-def seal_to_str(plaintext_key: str, duration_seconds: float) -> str:
-    return json.dumps(seal(plaintext_key, duration_seconds), separators=(",", ":"))
+def seal_to_str(
+    plaintext_key: str, duration_seconds: float, password_protected: bool = False
+) -> str:
+    return json.dumps(
+        seal(plaintext_key, duration_seconds, password_protected=password_protected),
+        separators=(",", ":"),
+    )
 
 
 def is_puzzle(blob: str) -> bool:
@@ -72,16 +134,33 @@ def is_puzzle(blob: str) -> bool:
         return False
     try:
         data = json.loads(blob)
-        return data.get("v") == 1 and "wrap" in data and "t" in data
+        return (
+            data.get("v") == 1
+            and "wrap" in data
+            and "t" in data
+            and data.get("kind") != _PW_KIND
+        )
     except Exception:
         return False
+
+
+def needs_password(blob: str) -> bool:
+    """True si al abrir (tras puzzle/calendario) hace falta contraseña."""
+    if is_password_wrap(blob):
+        return True
+    if is_puzzle(blob):
+        try:
+            return bool(json.loads(blob).get("pw"))
+        except Exception:
+            return False
+    return False
 
 
 def open_puzzle(
     blob: str,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> str:
-    """Resuelve squarings y devuelve la clave en claro. progress(done, total)."""
+    """Resuelve squarings y devuelve la clave (o envoltorio pw) en claro. progress(done, total)."""
     data = json.loads(blob) if isinstance(blob, str) else blob
     n = int(data["n"])
     a = int(data["a"])

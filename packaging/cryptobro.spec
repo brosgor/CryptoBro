@@ -1,15 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec — Linux / Windows (GitHub Actions)
+import os
+import sys
+from pathlib import Path
 
 block_cipher = None
+
+# uv/cpython embebido trae Tcl/Tk 9; hay que empaquetarlos o el AppImage falla al abrir.
+_tcl_bins = []
+_tcl_datas = []
+_prefix = Path(sys.base_prefix)
+_lib = _prefix / "lib"
+if (_lib / "libtcl9.0.so").exists():
+    _tcl_bins = [
+        (str(_lib / "libtcl9.0.so"), "."),
+        (str(_lib / "libtcl9tk9.0.so"), "."),
+    ]
+    if (_lib / "tcl9.0").is_dir():
+        _tcl_datas.append((str(_lib / "tcl9.0"), "tcl9.0"))
+    if (_lib / "tk9.0").is_dir():
+        _tcl_datas.append((str(_lib / "tk9.0"), "tk9.0"))
 
 a = Analysis(
     ['../src/main.py'],
     pathex=['../src'],
-    binaries=[],
+    binaries=_tcl_bins,
     datas=[
         ('../src/assets/words.json', 'assets'),
         ('../src/assets/images', 'assets/images'),
+        *_tcl_datas,
     ],
     hiddenimports=[
         'cryptography',
@@ -20,10 +39,11 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.filedialog',
         'tkinter.messagebox',
+        'tkinter.font',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(Path(SPECPATH) / 'runtime_tcltk.py')] if _tcl_bins else [],  # noqa: F821
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
