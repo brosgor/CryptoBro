@@ -92,9 +92,19 @@ class CryptoBro:
         decrypted_message = fernet.decrypt(encrypted_message.encode())
         return decrypted_message.decode()
 
-    def encryptFile(self, file_path: str, key: str, generated: bool = False) -> tuple[str, str, str]:
-        """Cifra a <hex opaco>.bros en chunks (v3); el nombre original va dentro.
-        Returns: (extension_encrypted, key_used, bros_path)
+    def encryptFile(
+        self,
+        file_path: str,
+        key: str,
+        generated: bool = False,
+        progress=None,
+        out_ext: str = ".bros",
+        out_dir: str | None = None,
+    ) -> tuple[str, str, str]:
+        """Cifra a <hex opaco>.bros|.sbro en chunks (v3); el nombre original va dentro.
+        progress(done_bytes, total_bytes) opcional.
+        out_dir: si se indica, no usa la bodega data/archivos_cifrados.
+        Returns: (extension_encrypted, key_used, cipher_path)
         """
         salt = b""
         if not generated:
@@ -107,12 +117,22 @@ class CryptoBro:
         if len(name_bytes) > 65535:
             raise ValueError("Nombre de archivo demasiado largo")
 
-        directory = str(__import__("domain.paths", fromlist=["cipher_dir"]).cipher_dir())
+        suffix = out_ext if out_ext.startswith(".") else f".{out_ext}"
+        if out_dir:
+            directory = out_dir
+            os.makedirs(directory, exist_ok=True)
+        else:
+            directory = str(__import__("domain.paths", fromlist=["cipher_dir"]).cipher_dir())
         while True:
-            opaque = secrets.token_hex(16) + ".bros"
+            opaque = secrets.token_hex(16) + suffix
             encrypted_path = os.path.join(directory, opaque)
             if not os.path.exists(encrypted_path):
                 break
+
+        total = os.path.getsize(file_path)
+        done = 0
+        if progress:
+            progress(0, max(total, 1))
 
         aesgcm = AESGCM(self._raw_key(key))
         with open(file_path, "rb") as fin, open(encrypted_path, "wb") as fout:
@@ -136,6 +156,9 @@ class CryptoBro:
                 fout.write(nonce)
                 fout.write(ct)
                 idx += 1
+                done += len(plain)
+                if progress:
+                    progress(done, max(total, 1))
                 if len(plain) < _CHUNK_SIZE:
                     break
 
@@ -144,12 +167,20 @@ class CryptoBro:
         return extension_encrypted, key, encrypted_path
 
     def decryptFile(
-        self, file_path: str, key: str, extension: str = None, generated: bool = False
+        self,
+        file_path: str,
+        key: str,
+        extension: str = None,
+        generated: bool = False,
+        progress=None,
     ) -> str:
-        """Descifra .bros (v1/v2 Fernet o v3 AES-GCM streaming). Devuelve la ruta."""
+        """Descifra .bros/.sbro (v1/v2 Fernet o v3 AES-GCM streaming). Devuelve la ruta."""
         from domain.paths import plain_dir
 
         directory = str(plain_dir())
+        total = os.path.getsize(file_path)
+        if progress:
+            progress(0, max(total, 1))
 
         with open(file_path, "rb") as encrypted_file:
             header = encrypted_file.read(5)
@@ -165,11 +196,13 @@ class CryptoBro:
 
             ver = header[4]
             file_salt = encrypted_file.read(16)
+            read_pos = 5 + 16
 
             if ver >= 3:
                 name_len = struct.unpack(">H", encrypted_file.read(2))[0]
                 original_name = encrypted_file.read(name_len).decode("utf-8")
                 chunk_size = struct.unpack(">I", encrypted_file.read(4))[0]
+                read_pos += 2 + name_len + 4
                 if chunk_size == 0 or chunk_size > 64 * 1024 * 1024:
                     raise ValueError("chunk_size inválido en .bros v3")
 
@@ -196,6 +229,11 @@ class CryptoBro:
                         plain = aesgcm.decrypt(nonce, ct, struct.pack(">Q", idx))
                         fout.write(plain)
                         idx += 1
+                        read_pos += 4 + 12 + ct_len
+                        if progress:
+                            progress(min(read_pos, total), max(total, 1))
+                if progress:
+                    progress(total, max(total, 1))
                 return decrypted_path
 
             # v1 / v2: Fernet (archivo completo en RAM; solo legado)
@@ -284,11 +322,13 @@ class CryptoBro:
     def getAllItems(self) -> list:
         return self.db.getAllItems()
 
-    def saveMessage(self, title: str, encrypted_message: str) -> int:
-        return self.db.addMessage(title, encrypted_message)
+    def saveMessage(self, title: str, encrypted_message: str, folder: str = "") -> int:
+        return self.db.addMessage(title, encrypted_message, folder=folder)
 
-    def updateMessage(self, msg_id: int, title: str, encrypted_message: str) -> int:
-        return self.db.updateMessage(msg_id, title, encrypted_message)
+    def updateMessage(
+        self, msg_id: int, title: str, encrypted_message: str, folder: str | None = None
+    ) -> int:
+        return self.db.updateMessage(msg_id, title, encrypted_message, folder=folder)
 
     def getAllMessages(self) -> list:
         return self.db.getAllMessages()
@@ -298,6 +338,27 @@ class CryptoBro:
 
     def deleteMessage(self, msg_id: int):
         return self.db.deleteMessage(msg_id)
+
+    def getMessageFolders(self) -> list:
+        return self.db.getMessageFolders()
+
+    def addNoteGroup(self, title: str, description: str = "") -> int:
+        return self.db.addNoteGroup(title, description)
+
+    def upsertNoteGroup(self, title: str, description: str | None = None) -> int:
+        return self.db.upsertNoteGroup(title, description)
+
+    def updateNoteGroup(self, group_id: int, title: str, description: str) -> int:
+        return self.db.updateNoteGroup(group_id, title, description)
+
+    def getNoteGroupByTitle(self, title: str):
+        return self.db.getNoteGroupByTitle(title)
+
+    def getAllNoteGroups(self) -> list:
+        return self.db.getAllNoteGroups()
+
+    def deleteNoteGroup(self, title: str, *, move_notes_to_root: bool = True) -> int:
+        return self.db.deleteNoteGroup(title, move_notes_to_root=move_notes_to_root)
 
     def addCapsule(self, label, bros_path, key, unlock_at, extension) -> int:
         return self.db.addCapsule(label, bros_path, key, unlock_at, extension)
@@ -313,7 +374,7 @@ class CryptoBro:
 
 
 def read_bros_name(path: str) -> str:
-    """Lee el nombre original desde el header del .bros sin descifrar."""
+    """Lee el nombre original desde el header .bros/.sbro sin descifrar."""
     try:
         with open(path, "rb") as f:
             header = f.read(5)
@@ -329,6 +390,11 @@ def read_bros_name(path: str) -> str:
             return os.path.basename(path) + ext
     except Exception:
         return os.path.basename(path)
+
+
+def is_capsule_cipher(path: str) -> bool:
+    """Cápsulas usan .sbro (y legados .bros aún listados en BD)."""
+    return path.lower().endswith(".sbro")
 
 
 def _shred_file(path: str, chunk: int = _CHUNK_SIZE) -> None:

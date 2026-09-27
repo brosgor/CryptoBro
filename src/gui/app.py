@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 from service.cryptoService import CryptoService
 from domain.vault import Vault
 from domain.paths import ICON_PNG
-from gui.widgets import RoundedButton
+from gui.widgets import RoundedButton, ScrollableFrame
 from gui import theme as T
 from gui.theme import apply_ttk_theme, page_header
 import os
@@ -15,7 +15,13 @@ class CryptoApp:
         self.root = root
         self.root.title("CryptoBro")
         self.root.geometry("900x600")
+        self.root.minsize(720, 480)
+        self.root.resizable(True, True)
         self._set_icon()
+        try:
+            self.root.iconname("CryptoBro")
+        except tk.TclError:
+            pass
 
         self.service = CryptoService(vault)
         self.want_switch_vault = False
@@ -61,6 +67,7 @@ class CryptoApp:
         tabControl.add(self.tab_keys, text="Claves")
 
         tabControl.pack(expand=1, fill="both", padx=10, pady=10)
+        tabControl.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self.setup_vault_tab()
         self.setup_encrypt_tab()
@@ -71,9 +78,50 @@ class CryptoApp:
         self.setup_generator_tab()
         self.setup_keys_tab()
 
+    def _on_tab_changed(self, _event=None):
+        try:
+            tab = self._notebook.nametowidget(self._notebook.select())
+        except Exception:
+            return
+        if tab is getattr(self, "tab_messages", None):
+            self.refresh_messages_list()
+        elif tab is getattr(self, "tab_decrypt", None):
+            self.refresh_bodega_list()
+        elif tab is getattr(self, "tab_capsules", None) and hasattr(self, "refresh_capsules"):
+            self.refresh_capsules()
+
+    @staticmethod
+    def _fmt_bytes(n: int) -> str:
+        n = float(max(n, 0))
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or unit == "TB":
+                return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+            n /= 1024
+        return f"{n:.1f} TB"
+
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        if seconds < 0 or seconds != seconds:  # NaN
+            return "…"
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        m, s = divmod(s, 60)
+        if m < 60:
+            return f"{m}m {s}s"
+        h, m = divmod(m, 60)
+        return f"{h}h {m}m"
+
+    def _tab_scroll(self, tab, padding="16"):
+        """Cuerpo de pestaña con scroll vertical si no cabe."""
+        scroll = ScrollableFrame(tab)
+        scroll.pack(fill="both", expand=True)
+        body = ttk.Frame(scroll.interior, padding=padding)
+        body.pack(fill="both", expand=True)
+        return body
+
     def setup_vault_tab(self):
-        outer = ttk.Frame(self.tab_vault, padding="20")
-        outer.pack(fill="both", expand=True)
+        outer = self._tab_scroll(self.tab_vault, "20")
 
         page_header(
             outer,
@@ -113,11 +161,8 @@ class CryptoApp:
         ttk.Label(grid, text="Descripción", style="Bold.TLabel", font=T.FONT_BOLD).grid(
             row=5, column=0, sticky="nw", pady=3, padx=(0, 10)
         )
-        self.desc_text = tk.Text(
-            grid, height=4, bg=T.SURFACE, fg=T.FG, insertbackground=T.FG,
-            highlightbackground=T.BORDER, highlightthickness=1, borderwidth=0, font=T.FONT,
-        )
-        self.desc_text.grid(row=5, column=1, sticky="ew", pady=3)
+        desc_box, self.desc_text = self._text_box(grid, height=4)
+        desc_box.grid(row=5, column=1, sticky="ew", pady=3)
         self.desc_text.insert("1.0", info["description"] or "")
         RoundedButton(grid, text="Guardar descripción", command=self.save_description).grid(
             row=6, column=1, sticky="e", pady=4
@@ -172,6 +217,31 @@ class CryptoApp:
             if value < 1024 or unit == "TB":
                 return f"{value:.1f} {unit}"
         return f"{n} B"
+
+    def _text_box(self, parent, height: int = 5):
+        """Text que respeta el ancho del padre (no desborda) + scroll vertical."""
+        box = ttk.Frame(parent)
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        text = tk.Text(
+            box,
+            height=height,
+            width=1,
+            bg=T.SURFACE,
+            fg=T.FG,
+            insertbackground=T.FG,
+            highlightbackground=T.BORDER,
+            highlightthickness=1,
+            borderwidth=0,
+            font=T.FONT,
+            wrap="word",
+            undo=True,
+        )
+        vsb = ttk.Scrollbar(box, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=vsb.set)
+        text.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        return box, text
 
     def save_description(self):
         try:
@@ -228,12 +298,11 @@ class CryptoApp:
 
     def setup_encrypt_tab(self):
         """Configura los widgets de la pestaña de encriptación."""
-        outer = ttk.Frame(self.tab_encrypt, padding="20")
-        outer.pack(fill="both", expand=True)
+        outer = self._tab_scroll(self.tab_encrypt, "20")
         page_header(
             outer,
             "Cifrar archivo",
-            "Elige un archivo y una clave. Opcionalmente guarda la clave en la bóveda con una frase memorable.",
+            "Clave + opcional puzzle CPU (anti fuerza bruta). Con puzzle, la clave se guarda en la bóveda.",
         ).pack(anchor="w", fill="x", pady=(0, 14))
 
         frame = ttk.Frame(outer)
@@ -285,10 +354,44 @@ class CryptoApp:
             side="left", padx=(8, 0)
         )
 
+        # Puzzle anti-bruteforce
+        self.enc_use_puzzle = tk.BooleanVar(value=False)
+        self.enc_puzzle_mins = tk.StringVar(value="0")
+        self.enc_puzzle_secs = tk.StringVar(value="10")
+        puzzle_row = ttk.Frame(frame)
+        puzzle_row.grid(row=2, column=1, columnspan=2, sticky="w", pady=(8, 2), padx=5)
+        ttk.Checkbutton(
+            puzzle_row,
+            text="Tiempo de descifrado (puzzle CPU)",
+            variable=self.enc_use_puzzle,
+            command=self._toggle_enc_puzzle,
+        ).pack(side="left")
+        ttk.Label(puzzle_row, text="Min").pack(side="left", padx=(12, 2))
+        self.spin_enc_pmin = ttk.Spinbox(
+            puzzle_row, from_=0, to=60, textvariable=self.enc_puzzle_mins, width=4
+        )
+        self.spin_enc_pmin.pack(side="left")
+        ttk.Label(puzzle_row, text="Seg").pack(side="left", padx=(8, 2))
+        self.spin_enc_psec = ttk.Spinbox(
+            puzzle_row, from_=0, to=59, textvariable=self.enc_puzzle_secs, width=4
+        )
+        self.spin_enc_psec.pack(side="left")
+        ttk.Label(
+            frame,
+            text="Al abrir: primero resuelve el puzzle, luego pide la contraseña. Requiere guardar en bóveda.",
+            style="Hint.TLabel",
+            wraplength=480,
+        ).grid(row=3, column=1, columnspan=2, sticky="w", padx=5)
+
         # Guardar en bóveda
         self.store_key_var = tk.BooleanVar(value=True)
-        cb = ttk.Checkbutton(frame, text="¿Guardar clave en la bóveda?", variable=self.store_key_var, command=self.toggle_encrypt_pass_info)
-        cb.grid(row=2, column=1, sticky="w", pady=(10, 5), padx=5)
+        self.cb_store_key = ttk.Checkbutton(
+            frame,
+            text="¿Guardar clave en la bóveda?",
+            variable=self.store_key_var,
+            command=self.toggle_encrypt_pass_info,
+        )
+        self.cb_store_key.grid(row=4, column=1, sticky="w", pady=(10, 5), padx=5)
 
         self.lbl_pass_title = ttk.Label(
             frame, text="Frase de recuperación", style="Bold.TLabel", font=T.FONT_BOLD
@@ -299,16 +402,37 @@ class CryptoApp:
             style="Hint.TLabel",
             wraplength=400,
         )
-        
+
         self.btn_action = RoundedButton(frame, text="Cifrar", command=self.perform_encryption)
-        self.btn_action.grid(row=4, column=1, pady=20)
-        
+        self.btn_action.grid(row=6, column=1, pady=(20, 6))
+
+        self.enc_progress = ttk.Progressbar(frame, mode="determinate", maximum=100)
+        self.enc_status = tk.StringVar(value="")
+        self.enc_progress.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        ttk.Label(frame, textvariable=self.enc_status, style="Hint.TLabel").grid(
+            row=8, column=0, columnspan=3, sticky="w"
+        )
+        self.enc_progress.grid_remove()
+        self._enc_busy = False
+
+        self._toggle_enc_puzzle()
         self.toggle_encrypt_pass_info()
 
+    def _toggle_enc_puzzle(self):
+        on = self.enc_use_puzzle.get()
+        state = "normal" if on else "disabled"
+        self.spin_enc_pmin.config(state=state)
+        self.spin_enc_psec.config(state=state)
+        if on:
+            self.store_key_var.set(True)
+            self.toggle_encrypt_pass_info()
+
     def toggle_encrypt_pass_info(self):
+        if self.enc_use_puzzle.get():
+            self.store_key_var.set(True)
         if self.store_key_var.get():
-            self.lbl_pass_title.grid(row=3, column=0, sticky="w", pady=5)
-            self.lbl_pass_info.grid(row=3, column=1, pady=5, sticky="w", padx=5)
+            self.lbl_pass_title.grid(row=5, column=0, sticky="w", pady=5)
+            self.lbl_pass_info.grid(row=5, column=1, pady=5, sticky="w", padx=5)
             self.btn_action.config(text="Cifrar y generar frase")
         else:
             self.lbl_pass_title.grid_remove()
@@ -337,88 +461,202 @@ class CryptoApp:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    def _set_enc_busy(self, busy: bool):
+        self._enc_busy = busy
+        self.btn_action.config(state="disabled" if busy else "normal")
+        if busy:
+            self.enc_progress.grid()
+            self.enc_progress["value"] = 0
+            self.enc_status.set("Cifrando…")
+        else:
+            self.enc_progress.grid_remove()
+            self.enc_status.set("")
+
     def perform_encryption(self):
+        if getattr(self, "_enc_busy", False):
+            return
         file_path = self.enc_file_path.get()
         key = self.enc_key.get()
         store = self.store_key_var.get()
-        
+        use_puzzle = self.enc_use_puzzle.get()
+
         if not file_path or not key:
             messagebox.showerror("Error", "Selecciona un archivo e introduce una clave.")
             return
         if len(key) < 8:
             messagebox.showerror("Error", "La clave debe tener al menos 8 caracteres.")
             return
-            
-        try:
-            extension, derived_key, bros_path = self.service.encryptFile(file_path, key)
+
+        puzzle_secs = 0
+        if use_puzzle:
+            try:
+                puzzle_secs = int(self.enc_puzzle_mins.get() or 0) * 60 + int(
+                    self.enc_puzzle_secs.get() or 0
+                )
+            except ValueError:
+                messagebox.showerror("Error", "Tiempo de puzzle inválido")
+                return
+            if puzzle_secs <= 0:
+                messagebox.showerror("Error", "Indica minutos y/o segundos de puzzle (> 0)")
+                return
+            if puzzle_secs > 3600:
+                messagebox.showerror("Error", "Máximo 60 minutos de puzzle")
+                return
+            store = True
+
+        import threading
+        import queue
+        import time
+
+        self._set_enc_busy(True)
+        q: queue.Queue = queue.Queue()
+        t0 = time.monotonic()
+        # con puzzle: clave aleatoria para el archivo; la del usuario envuelve tras el TLP
+        file_key = self.service.generate_key() if use_puzzle else key
+        generated = bool(use_puzzle)
+
+        def on_progress(done, total):
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put(("prog", done, total, time.monotonic() - t0))
+
+        def work():
+            err = None
+            result = None
+            try:
+                result = self.service.encryptFile(
+                    file_path, file_key, generated=generated, progress=on_progress
+                )
+            except Exception as e:
+                err = e
+            q.put(("done", err, result))
+
+        def finish_ok(extension, derived_key, bros_path):
             msg = (
                 f"Archivo cifrado.\n"
                 f"Salida (nombre opaco): {bros_path}\n"
                 f"(El nombre original queda dentro del .bros)"
             )
-            
-            if store:
-                while True:
-                    passphrase = self.service.generate_mnemonic_passphrase(6)
-                    hash_val = self.service.generate_hash(passphrase)
-                    if not self.service.getItemByHash(hash_val):
-                        break
-                
-                self.service.generate_and_store_key(hash=hash_val, key=derived_key, extension=extension, generated=True)
-                msg += f"\n\nClave guardada en la bóveda.\nFRASE: {passphrase}"
-                
-                if messagebox.askyesno(
-                    "Guardar frase",
-                    f"Tu frase de recuperación es:\n\n{passphrase}\n\n"
-                    "¿Copiar al portapapeles y guardar en un archivo .par?\n\n"
-                    "El .par se guarda CIFRADO con la clave de la bóveda (no en texto plano).",
-                ):
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(passphrase)
-                    par_path = self.service.write_recovery_par(passphrase, bros_path)
-                    msg += f"\nFrase copiada y guardada (cifrada) en: {par_path}"
-                else:
-                    if messagebox.askyesno("Portapapeles", "¿Copiar la frase al portapapeles?"):
+            if use_puzzle:
+                msg += f"\nPuzzle al abrir: ~{puzzle_secs}s de CPU, luego tu contraseña."
+            try:
+                if store:
+                    while True:
+                        passphrase = self.service.generate_mnemonic_passphrase(6)
+                        hash_val = self.service.generate_hash(passphrase)
+                        if not self.service.getItemByHash(hash_val):
+                            break
+
+                    to_store = derived_key
+                    if use_puzzle:
+                        to_store = self.service.seal_key_for_vault(
+                            file_key, puzzle_secs, key
+                        )
+
+                    self.service.generate_and_store_key(
+                        hash=hash_val, key=to_store, extension=extension, generated=True
+                    )
+                    msg += f"\n\nClave guardada en la bóveda.\nFRASE: {passphrase}"
+                    if use_puzzle:
+                        msg += "\n(Descifra con «Desde la bóveda» + frase; luego puzzle y contraseña.)"
+
+                    if messagebox.askyesno(
+                        "Guardar frase",
+                        f"Tu frase de recuperación es:\n\n{passphrase}\n\n"
+                        "¿Copiar al portapapeles y guardar en un archivo .par?\n\n"
+                        "El .par se guarda CIFRADO con la clave de la bóveda (no en texto plano).",
+                    ):
                         self.root.clipboard_clear()
                         self.root.clipboard_append(passphrase)
-                        msg += "\nFrase copiada al portapapeles."
+                        par_path = self.service.write_recovery_par(passphrase, bros_path)
+                        msg += f"\nFrase copiada y guardada (cifrada) en: {par_path}"
                     else:
-                        msg += "\n(¡Anota tu frase!)"
+                        if messagebox.askyesno("Portapapeles", "¿Copiar la frase al portapapeles?"):
+                            self.root.clipboard_clear()
+                            self.root.clipboard_append(passphrase)
+                            msg += "\nFrase copiada al portapapeles."
+                        else:
+                            msg += "\n(¡Anota tu frase!)"
 
-            if messagebox.askyesno("¿Borrar original?", "Cifrado listo. ¿Borrar el archivo original (sin cifrar)?"):
-                try:
-                    from domain.cryptoBro import _shred_file
+                if messagebox.askyesno(
+                    "¿Borrar original?", "Cifrado listo. ¿Borrar el archivo original (sin cifrar)?"
+                ):
+                    try:
+                        from domain.cryptoBro import _shred_file
 
-                    _shred_file(file_path)
-                    msg += "\nArchivo original sobrescrito y eliminado."
-                except OSError as e:
-                    msg += f"\nNo se pudo borrar el original: {e}"
-            
-            messagebox.showinfo("Listo", msg)
-            self.refresh_keys_list()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+                        _shred_file(file_path)
+                        msg += "\nArchivo original sobrescrito y eliminado."
+                    except OSError as e:
+                        msg += f"\nNo se pudo borrar el original: {e}"
+
+                messagebox.showinfo("Listo", msg)
+                self.refresh_keys_list()
+                self.refresh_bodega_list()
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+        def poll():
+            finished = False
+            err = None
+            result = None
+            try:
+                while True:
+                    item = q.get_nowait()
+                    if item[0] == "done":
+                        finished = True
+                        err = item[1]
+                        result = item[2]
+                    elif item[0] == "prog":
+                        _, done, total, elapsed = item
+                        total = max(total, 1)
+                        pct = min(100, int(100 * done / total))
+                        self.enc_progress["value"] = pct
+                        rate = done / elapsed if elapsed > 0.2 else 0
+                        eta = (total - done) / rate if rate > 0 else -1
+                        self.enc_status.set(
+                            f"Cifrando… {pct}% · {self._fmt_bytes(done)} / {self._fmt_bytes(total)}"
+                            + (f" · ~{self._fmt_eta(eta)}" if eta >= 0 else "")
+                        )
+            except queue.Empty:
+                pass
+            if finished:
+                self._set_enc_busy(False)
+                if err:
+                    messagebox.showerror("Error", str(err))
+                elif result:
+                    finish_ok(*result)
+                return
+            self.root.after(80, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        poll()
 
     def setup_decrypt_tab(self):
         outer = ttk.Frame(self.tab_decrypt, padding="20")
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
         page_header(
             outer,
             "Descifrar archivo",
-            "Elige de la bodega (o importa un .bros) y usa la clave manual o la frase guardada.",
+            "Elige de la bodega (o importa un .bros). Las cápsulas (.sbro) están en la pestaña Cápsulas.",
         ).pack(anchor="w", fill="x", pady=(0, 14))
 
         body = ttk.Frame(outer)
         body.pack(fill="both", expand=True)
         body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
 
         left = ttk.Frame(body, padding=(0, 0, 10, 0))
         left.grid(row=0, column=0, sticky="nsw")
-        ttk.Label(left, text="Bodega", style="Heading.TLabel", font=T.FONT_SUB).pack(
+        ttk.Label(left, text="Bodega (.bros)", style="Heading.TLabel", font=T.FONT_SUB).pack(
             anchor="w", pady=(0, 6)
         )
         self.bodega_listbox = tk.Listbox(
-            left, width=34,
+            left, width=34, height=16,
             bg=T.SURFACE, fg=T.FG, selectbackground=T.SELECT, selectforeground=T.SELECT_FG,
             borderwidth=1, highlightthickness=1, highlightbackground=T.BORDER, font=T.FONT,
         )
@@ -429,8 +667,9 @@ class CryptoApp:
         RoundedButton(bbtns, text="Actualizar", command=self.refresh_bodega_list).pack(fill="x", pady=2)
         RoundedButton(bbtns, text="Importar .bros", command=self.import_bros_to_bodega).pack(fill="x", pady=2)
 
-        frame = ttk.Frame(body)
-        frame.grid(row=0, column=1, sticky="nsew")
+        right_scroll = ScrollableFrame(body)
+        right_scroll.grid(row=0, column=1, sticky="nsew")
+        frame = right_scroll.interior
         frame.columnconfigure(1, weight=1)
 
         self.dec_file_path = tk.StringVar()
@@ -457,10 +696,20 @@ class CryptoApp:
         self.entry_dec_pass = ttk.Entry(self.pass_frame)
         self.entry_dec_pass.pack(side="left", padx=(0, 5), fill="x", expand=True)
         RoundedButton(self.pass_frame, text="Cargar .par", command=self.load_par_file).pack(side="left")
-        
+
         self.toggle_dec_inputs()
 
-        RoundedButton(frame, text="Descifrar", command=self.perform_decryption).grid(row=4, column=1, pady=20)
+        self.btn_decrypt = RoundedButton(frame, text="Descifrar", command=self.perform_decryption)
+        self.btn_decrypt.grid(row=4, column=1, pady=(20, 6))
+
+        self.dec_progress = ttk.Progressbar(frame, mode="determinate", maximum=100)
+        self.dec_status = tk.StringVar(value="")
+        self.dec_progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        ttk.Label(frame, textvariable=self.dec_status, style="Hint.TLabel").grid(
+            row=6, column=0, columnspan=3, sticky="w"
+        )
+        self.dec_progress.grid_remove()
+        self._dec_busy = False
 
         self.refresh_bodega_list()
 
@@ -468,12 +717,9 @@ class CryptoApp:
         if not hasattr(self, "bodega_listbox"):
             return
         self._bodega_cache = self.service.list_bodega()
-        caps = self.service.get_all_capsules()
-        cap_paths = {os.path.abspath(c.bros_path) for c in caps if c.bros_path}
         self.bodega_listbox.delete(0, tk.END)
         for it in self._bodega_cache:
-            tag = "  [cápsula]" if os.path.abspath(it["path"]) in cap_paths else ""
-            self.bodega_listbox.insert(tk.END, f"{it['original']}{tag}")
+            self.bodega_listbox.insert(tk.END, it["original"])
 
     def _on_bodega_select(self, event=None):
         sel = self.bodega_listbox.curselection()
@@ -488,6 +734,12 @@ class CryptoApp:
             filetypes=[("Archivos .bros", "*.bros"), ("Todos", "*.*")],
         )
         if not path:
+            return
+        if path.lower().endswith(".sbro"):
+            messagebox.showinfo(
+                "Cápsula",
+                "Los .sbro son cápsulas. Usa la pestaña Cápsulas → Importar.",
+            )
             return
         try:
             dest = self.service.import_bros_file(path)
@@ -508,8 +760,16 @@ class CryptoApp:
                 messagebox.showerror("Error", f"No se pudo leer el archivo: {e}")
 
     def browse_decrypt_file(self):
-        filename = filedialog.askopenfilename(filetypes=[("Archivos .bros", "*.bros"), ("Todos", "*.*")])
+        filename = filedialog.askopenfilename(
+            filetypes=[("Archivos .bros", "*.bros"), ("Todos", "*.*")]
+        )
         if filename:
+            if filename.lower().endswith(".sbro"):
+                messagebox.showinfo(
+                    "Cápsula",
+                    "Los .sbro se abren desde la pestaña Cápsulas.",
+                )
+                return
             self.dec_file_path.set(filename)
 
     def toggle_dec_inputs(self):
@@ -528,31 +788,54 @@ class CryptoApp:
                 self.lbl_dec_pass.grid(row=3, column=0, sticky="w", pady=5)
                 self.pass_frame.grid(row=3, column=1, pady=5, sticky="ew", padx=5)
 
+    def _set_dec_busy(self, busy: bool):
+        self._dec_busy = busy
+        self.btn_decrypt.config(state="disabled" if busy else "normal")
+        if busy:
+            self.dec_progress.grid()
+            self.dec_progress["value"] = 0
+            self.dec_status.set("Descifrando…")
+        else:
+            self.dec_progress.grid_remove()
+            self.dec_status.set("")
+
     def perform_decryption(self):
+        if getattr(self, "_dec_busy", False):
+            return
         file_path = self.dec_file_path.get()
         mode = self.dec_mode.get()
-        
+
         if not file_path:
             messagebox.showerror("Error", "Selecciona un archivo.")
             return
-            
+        if file_path.lower().endswith(".sbro"):
+            messagebox.showinfo("Cápsula", "Abre los .sbro desde la pestaña Cápsulas.")
+            return
+
         key = None
         extension = None
-        generated = False 
-        
+        generated = False
+        sealed_blob = None
+
         try:
-            if mode == 'db':
+            if mode == "db":
                 passphrase = self.entry_dec_pass.get()
                 if not passphrase:
                     messagebox.showerror("Error", "Introduce la frase de recuperación.")
                     return
                 hash_val = self.service.generate_hash(passphrase)
                 item = self.service.getItemByHash(hash_val)
-                
+
                 if item:
                     extension = item.extension
-                    key = item.key
-                    generated = True
+                    from domain.timelock import is_puzzle
+
+                    if is_puzzle(item.key):
+                        sealed_blob = item.key
+                        generated = True
+                    else:
+                        key = item.key
+                        generated = True
                 else:
                     messagebox.showerror("Error", "No hay clave para esta frase.")
                     return
@@ -561,20 +844,131 @@ class CryptoApp:
                 if not key:
                     messagebox.showerror("Error", "Introduce la clave.")
                     return
-                
-            out = self.service.decryptFile(file_path, key, extension=extension, generated=generated)
-            messagebox.showinfo(
-                "Listo",
-                f"Descifrado correctamente:\n{out}\n\nEl archivo cifrado (.bros) se eliminó.",
-            )
-            
+                from domain.timelock import is_puzzle
+
+                if is_puzzle(key):
+                    messagebox.showinfo(
+                        "Puzzle",
+                        "Esta clave está protegida con puzzle.\n"
+                        "Usa «Desde la bóveda» con la frase de recuperación.",
+                    )
+                    return
         except Exception as e:
-            messagebox.showerror("Error", f"Falló el descifrado: {str(e)}")
+            messagebox.showerror("Error", str(e))
+            return
+
+        import threading
+        import queue
+        import time
+        from tkinter import simpledialog
+
+        file_password = None
+        if sealed_blob is not None:
+            from domain.timelock import needs_password
+
+            if needs_password(sealed_blob):
+                file_password = simpledialog.askstring(
+                    "Contraseña",
+                    "Tras el puzzle se usará esta contraseña de cifrado:",
+                    show="*",
+                    parent=self.root,
+                )
+                if not file_password:
+                    return
+
+        self._set_dec_busy(True)
+        q: queue.Queue = queue.Queue()
+        t0 = time.monotonic()
+
+        def on_file_progress(done, total):
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put(("fprog", done, total, time.monotonic() - t0))
+
+        def on_puzzle_progress(done, total):
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put(("pprog", done, total))
+
+        def work_full():
+            err = None
+            out = None
+            try:
+                use_key = key
+                if sealed_blob is not None:
+                    q.put(("status", "Resolviendo puzzle…"))
+                    use_key = self.service.release_vault_key(
+                        sealed_blob, password=file_password, progress=on_puzzle_progress
+                    )
+                q.put(("status", "Descifrando archivo…"))
+                out = self.service.decryptFile(
+                    file_path,
+                    use_key,
+                    extension=extension,
+                    generated=generated,
+                    progress=on_file_progress,
+                )
+            except Exception as e:
+                err = e
+            q.put(("done", err, out))
+
+        def poll():
+            finished = False
+            err = None
+            out = None
+            try:
+                while True:
+                    item = q.get_nowait()
+                    if item[0] == "done":
+                        finished = True
+                        err = item[1]
+                        out = item[2]
+                    elif item[0] == "status":
+                        self.dec_status.set(item[1])
+                    elif item[0] == "pprog":
+                        _, done, total = item
+                        total = max(total, 1)
+                        pct = min(100, int(100 * done / total))
+                        self.dec_progress["value"] = pct
+                        self.dec_status.set(f"Puzzle… {pct}% ({done}/{total})")
+                    elif item[0] == "fprog":
+                        _, done, total, elapsed = item
+                        total = max(total, 1)
+                        pct = min(100, int(100 * done / total))
+                        self.dec_progress["value"] = pct
+                        rate = done / elapsed if elapsed > 0.2 else 0
+                        eta = (total - done) / rate if rate > 0 else -1
+                        self.dec_status.set(
+                            f"Descifrando… {pct}% · {self._fmt_bytes(done)} / {self._fmt_bytes(total)}"
+                            + (f" · ~{self._fmt_eta(eta)}" if eta >= 0 else "")
+                        )
+            except queue.Empty:
+                pass
+            if finished:
+                self._set_dec_busy(False)
+                if err:
+                    messagebox.showerror("Error", f"Falló el descifrado: {err}")
+                else:
+                    messagebox.showinfo(
+                        "Listo",
+                        f"Descifrado correctamente:\n{out}\n\nEl archivo cifrado (.bros) se eliminó.",
+                    )
+                    self.refresh_bodega_list()
+                return
+            self.root.after(80, poll)
+
+        threading.Thread(target=work_full, daemon=True).start()
+        poll()
 
 
     def setup_hash_tab(self):
-        frame = ttk.Frame(self.tab_hash, padding="16")
-        frame.pack(fill="both", expand=True)
+        frame = self._tab_scroll(self.tab_hash, "16")
         frame.columnconfigure(1, weight=1)
 
         page_header(
@@ -657,8 +1051,7 @@ class CryptoApp:
         self._toggle_hash_mode()
 
     def setup_generator_tab(self):
-        frame = ttk.Frame(self.tab_gen, padding="16")
-        frame.pack(fill="both", expand=True)
+        frame = self._tab_scroll(self.tab_gen, "16")
         frame.columnconfigure(1, weight=1)
 
         page_header(
@@ -949,8 +1342,7 @@ class CryptoApp:
         self.root.after(80, poll)
 
     def setup_keys_tab(self):
-        frame = ttk.Frame(self.tab_keys, padding="20")
-        frame.pack(fill="both", expand=True)
+        frame = self._tab_scroll(self.tab_keys, "20")
 
         from domain.paths import get_workspace, cipher_dir, plain_dir
 
@@ -979,7 +1371,7 @@ class CryptoApp:
         )
 
         columns = ("ID", "Hash", "Extension")
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings")
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)
         self.tree.heading("ID", text="ID")
         self.tree.heading("Hash", text="Huella de la frase")
         self.tree.heading("Extension", text="Extensión")
@@ -988,7 +1380,7 @@ class CryptoApp:
         self.tree.column("Hash", width=300)
         self.tree.column("Extension", width=100)
 
-        self.tree.pack(fill="both", expand=True)
+        self.tree.pack(fill="x", expand=False)
 
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=10)
@@ -1186,7 +1578,8 @@ class CryptoApp:
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             frame,
-            text="1) Tiempo a bloquear: espera de calendario hasta poder abrir (reloj del PC).\n"
+            text="Las cápsulas se guardan en la bóveda (no en data/). Exportar → archivo .sbro portátil.\n"
+            "1) Tiempo a bloquear: espera de calendario hasta poder abrir (reloj del PC).\n"
             "2) Tiempo de descifrado: al Resolver, la CPU trabaja esos min/seg (puzzle).\n"
             "3) Contraseña (opcional): tras calendario/puzzle, pide clave para descifrar. "
             "Puedes combinar las tres capas.",
@@ -1199,8 +1592,10 @@ class CryptoApp:
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
-        form = ttk.Frame(body, padding=8)
-        form.grid(row=0, column=0, sticky="nsw")
+        form_scroll = ScrollableFrame(body)
+        form_scroll.grid(row=0, column=0, sticky="nsw")
+        form = ttk.Frame(form_scroll.interior, padding=8)
+        form.pack(fill="both", expand=True)
         form.columnconfigure(1, weight=1)
 
         ttk.Label(form, text="Archivo", style="Bold.TLabel", font=T.FONT_BOLD).grid(
@@ -1282,9 +1677,18 @@ class CryptoApp:
         self.entry_cap_pw2 = ttk.Entry(form, textvariable=self.cap_pw2, show="*")
         self._toggle_cap_password()
 
-        RoundedButton(form, text="Crear cápsula", command=self.create_capsule).grid(
-            row=12, column=1, sticky="e", pady=10
+        self.btn_create_capsule = RoundedButton(
+            form, text="Crear cápsula", command=self.create_capsule
         )
+        self.btn_create_capsule.grid(row=12, column=1, sticky="e", pady=(10, 2))
+        self.cap_status = tk.StringVar(value="")
+        ttk.Label(form, textvariable=self.cap_status, style="Hint.TLabel").grid(
+            row=13, column=0, columnspan=3, sticky="w"
+        )
+        self.cap_progress = ttk.Progressbar(form, mode="determinate", maximum=100)
+        self.cap_progress.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(2, 0))
+        self.cap_progress.grid_remove()
+        self._cap_busy = False
 
         right = ttk.Frame(body, padding=8)
         right.grid(row=0, column=1, sticky="nsew")
@@ -1427,6 +1831,8 @@ class CryptoApp:
         return " ".join(parts), False, secs_left
 
     def create_capsule(self):
+        if getattr(self, "_cap_busy", False):
+            return
         path = self.cap_file.get().strip()
         if not path:
             messagebox.showerror("Error", "Selecciona un archivo")
@@ -1440,45 +1846,123 @@ class CryptoApp:
             if len(password) < 8:
                 messagebox.showerror("Error", "La contraseña debe tener al menos 8 caracteres")
                 return
+
         try:
-            cid, unlock_at, bros, lock_secs, dec_secs, use_pw = self.service.create_time_capsule(
-                file_path=path,
-                label=self.cap_label.get(),
-                years=self._parse_int(self.cap_years, "Años"),
-                days=self._parse_int(self.cap_days, "Días"),
-                hours=self._parse_int(self.cap_hours, "Horas"),
-                lock_minutes=self._parse_int(self.cap_lock_mins, "Min bloqueo"),
-                decrypt_minutes=self._parse_int(self.cap_dec_mins, "Min descifrado"),
-                decrypt_seconds=self._parse_int(self.cap_dec_secs, "Seg descifrado"),
-                delete_original=self.cap_del_orig.get(),
-                password=password,
-            )
-            parts = [f"ID {cid}"]
-            if lock_secs > 0:
-                parts.append(f"Bloqueo hasta:\n{unlock_at}")
-            else:
-                parts.append("Sin espera de calendario (puedes Resolver ya).")
-            if dec_secs > 0:
-                parts.append(f"Descifrado: {self._fmt_cpu(dec_secs)} al Resolver")
-            else:
-                parts.append("Descifrado: inmediato (sin puzzle)")
-            if use_pw:
-                parts.append("Contraseña: sí (se pedirá tras calendario/puzzle)")
-            else:
-                parts.append("Contraseña: no")
-            parts.append(f"Archivo:\n{bros}")
-            messagebox.showinfo("Cápsula creada", "\n\n".join(parts))
-            if lock_secs > 0:
-                self._cap_anim_totals[cid] = max(lock_secs, 1.0)
-            self.cap_file.set("")
-            self.cap_pw.set("")
-            self.cap_pw2.set("")
-            self.refresh_capsules()
-            if self.cap_tree.exists(str(cid)):
-                self.cap_tree.selection_set(str(cid))
-                self._on_capsule_select()
+            years = self._parse_int(self.cap_years, "Años")
+            days = self._parse_int(self.cap_days, "Días")
+            hours = self._parse_int(self.cap_hours, "Horas")
+            lock_minutes = self._parse_int(self.cap_lock_mins, "Min bloqueo")
+            decrypt_minutes = self._parse_int(self.cap_dec_mins, "Min descifrado")
+            decrypt_seconds = self._parse_int(self.cap_dec_secs, "Seg descifrado")
         except Exception as e:
             messagebox.showerror("Error", str(e))
+            return
+
+        import threading
+        import queue
+        import time
+
+        label = self.cap_label.get()
+        delete_original = self.cap_del_orig.get()
+        self._cap_busy = True
+        self.btn_create_capsule.config(state="disabled")
+        self.cap_progress.grid()
+        self.cap_progress["value"] = 0
+        self.cap_status.set("Cifrando cápsula…")
+        q: queue.Queue = queue.Queue()
+        t0 = time.monotonic()
+
+        def on_progress(done, total):
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put(("prog", done, total, time.monotonic() - t0))
+
+        def work():
+            err = None
+            result = None
+            try:
+                result = self.service.create_time_capsule(
+                    file_path=path,
+                    label=label,
+                    years=years,
+                    days=days,
+                    hours=hours,
+                    lock_minutes=lock_minutes,
+                    decrypt_minutes=decrypt_minutes,
+                    decrypt_seconds=decrypt_seconds,
+                    delete_original=delete_original,
+                    password=password,
+                    progress=on_progress,
+                )
+            except Exception as e:
+                err = e
+            q.put(("done", err, result))
+
+        def poll():
+            finished = False
+            err = None
+            result = None
+            try:
+                while True:
+                    item = q.get_nowait()
+                    if item[0] == "done":
+                        finished = True
+                        err = item[1]
+                        result = item[2]
+                    elif item[0] == "prog":
+                        _, done, total, elapsed = item
+                        total = max(total, 1)
+                        pct = min(100, int(100 * done / total))
+                        self.cap_progress["value"] = pct
+                        rate = done / elapsed if elapsed > 0.2 else 0
+                        eta = (total - done) / rate if rate > 0 else -1
+                        self.cap_status.set(
+                            f"Cifrando… {pct}% · {self._fmt_bytes(done)} / {self._fmt_bytes(total)}"
+                            + (f" · ~{self._fmt_eta(eta)}" if eta >= 0 else "")
+                        )
+            except queue.Empty:
+                pass
+            if finished:
+                self._cap_busy = False
+                self.btn_create_capsule.config(state="normal")
+                self.cap_progress.grid_remove()
+                self.cap_status.set("")
+                if err:
+                    messagebox.showerror("Error", str(err))
+                    return
+                cid, unlock_at, bros, lock_secs, dec_secs, use_pw = result
+                parts = [f"ID {cid}"]
+                if lock_secs > 0:
+                    parts.append(f"Bloqueo hasta:\n{unlock_at}")
+                else:
+                    parts.append("Sin espera de calendario (puedes Resolver ya).")
+                if dec_secs > 0:
+                    parts.append(f"Descifrado: {self._fmt_cpu(dec_secs)} al Resolver")
+                else:
+                    parts.append("Descifrado: inmediato (sin puzzle)")
+                if use_pw:
+                    parts.append("Contraseña: sí (se pedirá tras calendario/puzzle)")
+                else:
+                    parts.append("Contraseña: no")
+                parts.append(f"Archivo (.sbro):\n{bros}")
+                messagebox.showinfo("Cápsula creada", "\n\n".join(parts))
+                if lock_secs > 0:
+                    self._cap_anim_totals[cid] = max(lock_secs, 1.0)
+                self.cap_file.set("")
+                self.cap_pw.set("")
+                self.cap_pw2.set("")
+                self.refresh_capsules()
+                if self.cap_tree.exists(str(cid)):
+                    self.cap_tree.selection_set(str(cid))
+                    self._on_capsule_select()
+                return
+            self.root.after(80, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        poll()
 
     def _draw_cap_timer(self, cap, frac=None, status=None):
         import math
@@ -1553,6 +2037,11 @@ class CryptoApp:
         self._capsules_cache = self.service.get_all_capsules()
         for c in self._capsules_cache:
             _, ready, _ = self._format_cal_remaining(c.unlock_at)
+            path_disp = c.bros_path or ""
+            if ".cb_capsules" in path_disp.replace("\\", "/"):
+                path_disp = "en bóveda"
+            else:
+                path_disp = os.path.basename(path_disp) or path_disp
             self.cap_tree.insert(
                 "",
                 "end",
@@ -1562,7 +2051,7 @@ class CryptoApp:
                     c.label,
                     self._cap_lock_label(c),
                     self._cap_decrypt_label(c),
-                    c.bros_path,
+                    path_disp,
                 ),
                 tags=("ready",) if ready else ("locked",),
             )
@@ -1631,7 +2120,7 @@ class CryptoApp:
             messagebox.showinfo(
                 "Listo",
                 f"Cápsula desbloqueada.\nArchivo:\n{out}\n\n"
-                "El .bros permanece (bodega). Usa Eliminar si quieres quitarlo de la lista.",
+                "El .sbro permanece en disco. Usa Eliminar si quieres quitarlo de la lista.",
             )
             self.refresh_capsules()
         except Exception as e:
@@ -1746,7 +2235,7 @@ class CryptoApp:
             wipe = messagebox.askyesno(
                 "Archivo cifrado",
                 f"¿Borrar también el archivo cifrado?\n{cap.bros_path}\n\n"
-                "Si no lo borras, el .bros queda en disco aunque ya no esté en la lista.",
+                "Si no lo borras, el .sbro/.bros queda en disco aunque ya no esté en la lista.",
             )
         self.service.delete_capsule(cid, wipe_bros=wipe)
         self.refresh_capsules()
@@ -1761,148 +2250,395 @@ class CryptoApp:
         name = (cap.label if cap else "capsula") or "capsula"
         path = filedialog.asksaveasfilename(
             title="Exportar cápsula",
-            defaultextension=".cap",
-            filetypes=[("Cápsula CryptoBro", "*.cap")],
-            initialfile=f"{name}.cap",
+            defaultextension=".sbro",
+            filetypes=[("Cápsula CryptoBro", "*.sbro"), ("Todos", "*.*")],
+            initialfile=f"{name}.sbro",
         )
         if not path:
             return
         try:
             out = self.service.export_capsule(cid, path)
-            messagebox.showinfo("Exportada", f"Cápsula exportada a:\n{out}")
+            messagebox.showinfo("Exportada", f"Cápsula exportada (.sbro):\n{out}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     def import_capsule(self):
         path = filedialog.askopenfilename(
             title="Importar cápsula",
-            filetypes=[("Cápsula CryptoBro", "*.cap"), ("Todos", "*.*")],
+            filetypes=[
+                ("Cápsula CryptoBro", "*.sbro"),
+                ("Cápsula antigua", "*.cap"),
+                ("Todos", "*.*"),
+            ],
         )
         if not path:
             return
         try:
             cid = self.service.import_capsule(path)
             self.refresh_capsules()
-            messagebox.showinfo("Importada", f"Cápsula importada (ID {cid}).")
+            messagebox.showinfo("Importada", f"Cápsula importada en la bóveda (ID {cid}).")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     # --- Messaging Tab ---
     def setup_messages_tab(self):
-        """Setup for the Secure Messages Tab"""
+        """Notas cifradas con grupos/carpetas + export/import."""
         outer = ttk.Frame(self.tab_messages, padding="10")
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
 
         page_header(
             outer,
             "Notas cifradas",
-            "Cada nota se cifra con su propia contraseña y se guarda en la bóveda.",
-        ).pack(anchor="w", fill="x", pady=(0, 10))
+            "Organiza por grupo/carpeta. Exporta .cnote (sigue cifrada; hace falta la contraseña).",
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
         frame = ttk.Frame(outer)
-        frame.pack(fill="both", expand=True)
+        frame.grid(row=1, column=0, sticky="nsew")
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
 
-        # Split into Left (List) and Right (Details)
         left_panel = ttk.Frame(frame)
-        left_panel.pack(side="left", fill="y", padx=(0, 10))
+        left_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
+        left_panel.rowconfigure(1, weight=1)
 
-        right_panel = ttk.Frame(frame)
-        right_panel.pack(side="left", fill="both", expand=True)
+        right_scroll = ScrollableFrame(frame)
+        right_scroll.grid(row=0, column=1, sticky="nsew")
+        self._notes_scroll = right_scroll
+        self.right_container = right_scroll.interior
 
-        # -- Left Panel: Message List --
         ttk.Label(
-            left_panel, text="Notas guardadas", style="Heading.TLabel", font=T.FONT_SUB
-        ).pack(anchor="w", pady=(0, 6))
+            left_panel, text="Grupos / notas", style="Heading.TLabel", font=T.FONT_SUB
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
 
-        self.msg_listbox = tk.Listbox(
+        self.msg_tree = ttk.Treeview(
             left_panel,
-            bg=T.SURFACE,
-            fg=T.FG,
-            selectbackground=T.SELECT,
-            selectforeground=T.SELECT_FG,
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground=T.BORDER,
-            font=T.FONT,
+            columns=("title",),
+            show="tree",
+            height=16,
+            selectmode="browse",
         )
-        self.msg_listbox.pack(fill="both", expand=True, pady=5)
-        self.msg_listbox.bind('<<ListboxSelect>>', self.on_message_select)
-        
+        self.msg_tree.grid(row=1, column=0, sticky="nsew", pady=5)
+        self.msg_tree.bind("<<TreeviewSelect>>", self.on_message_select)
+        self.msg_tree.tag_configure("folder", foreground=T.FG_MUTED)
+
         btn_frm_msgs = ttk.Frame(left_panel)
-        btn_frm_msgs.pack(fill="x", pady=5)
-        RoundedButton(btn_frm_msgs, text="Actualizar", command=self.refresh_messages_list).pack(fill="x", pady=2)
-        RoundedButton(btn_frm_msgs, text="Eliminar", command=self.delete_selected_message).pack(fill="x", pady=2)
-        RoundedButton(btn_frm_msgs, text="+ Nueva nota", command=self.show_new_message_form).pack(fill="x", pady=(10, 2))
+        btn_frm_msgs.grid(row=2, column=0, sticky="ew", pady=5)
+        RoundedButton(btn_frm_msgs, text="Actualizar", command=self.refresh_messages_list).pack(
+            fill="x", pady=2
+        )
+        RoundedButton(btn_frm_msgs, text="Exportar", command=self.export_selected_note).pack(
+            fill="x", pady=2
+        )
+        RoundedButton(btn_frm_msgs, text="Importar", command=self.import_note_file).pack(
+            fill="x", pady=2
+        )
+        RoundedButton(btn_frm_msgs, text="Eliminar", command=self.delete_selected_message).pack(
+            fill="x", pady=2
+        )
+        RoundedButton(
+            btn_frm_msgs, text="+ Nuevo grupo", command=self.show_new_group_form
+        ).pack(fill="x", pady=(10, 2))
+        RoundedButton(
+            btn_frm_msgs, text="+ Nueva nota", command=lambda: self.show_new_message_form()
+        ).pack(fill="x", pady=2)
 
-        # -- Right Panel: forms --
-        # We will use frames to switch between "New Message" and "View Message"
-        self.right_container = right_panel
-        self.show_new_message_form() # Default view
+        self._msg_iid_map = {}
+        self._groups_cache = {}
+        self.show_new_message_form()
+        self.refresh_messages_list()
 
-    def show_new_message_form(self):
+    @staticmethod
+    def _widget_alive(w) -> bool:
+        try:
+            return w is not None and bool(w.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _folder_label(self, folder: str) -> str:
+        return folder.strip() if folder and folder.strip() else "Sin grupo"
+
+    def _refresh_folder_combo(self):
+        extras = sorted(
+            {f for f in self.service.get_message_folders() if f and f.strip()},
+            key=str.lower,
+        )
+        values = ["Sin grupo"] + [f for f in extras if f != "Sin grupo"]
+        for attr in ("new_msg_folder_combo", "edit_msg_folder_combo"):
+            w = getattr(self, attr, None)
+            if self._widget_alive(w):
+                try:
+                    w["values"] = values
+                except tk.TclError:
+                    pass
+        return values
+
+    def show_new_group_form(self):
+        """Formulario para crear un grupo con título y descripción."""
+        self.clear_right_panel()
+        self.current_viewing_message = None
+
+        ttk.Label(
+            self.right_container,
+            text="Nuevo grupo",
+            style="Page.TLabel",
+            font=T.FONT_PAGE,
+        ).pack(anchor="w", pady=(4, 12), padx=12)
+
+        form = ttk.Frame(self.right_container)
+        form.pack(fill="both", expand=True, padx=20)
+        form.columnconfigure(1, weight=1)
+
+        ttk.Label(form, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
+        self.new_group_title = tk.StringVar()
+        ttk.Entry(form, textvariable=self.new_group_title).grid(
+            row=0, column=1, sticky="ew", pady=5
+        )
+
+        ttk.Label(form, text="Descripción", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=1, column=0, sticky="nw", pady=5
+        )
+        desc_box, self.new_group_desc = self._text_box(form, height=6)
+        desc_box.grid(row=1, column=1, sticky="nsew", pady=5)
+        form.rowconfigure(1, weight=1)
+
+        RoundedButton(form, text="Crear grupo", command=self.save_new_group).grid(
+            row=2, column=1, sticky="e", pady=16
+        )
+        if hasattr(self, "_notes_scroll"):
+            self._notes_scroll.scroll_to_top()
+
+    def save_new_group(self):
+        title = (self.new_group_title.get() or "").strip()
+        desc = self.new_group_desc.get("1.0", tk.END).strip()
+        if not title:
+            messagebox.showerror("Error", "El grupo necesita un título.")
+            return
+        if title.lower() == "sin grupo":
+            messagebox.showerror("Error", "Ese nombre está reservado.")
+            return
+        try:
+            self.service.create_note_group(title, desc)
+            messagebox.showinfo("Listo", f"Grupo «{title}» creado.")
+            self.refresh_messages_list()
+            self.show_group_view(title)
+            fid = f"f:{title}"
+            if hasattr(self, "msg_tree") and self.msg_tree.exists(fid):
+                self.msg_tree.selection_set(fid)
+                self.msg_tree.see(fid)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def show_group_view(self, folder: str):
+        """Panel del grupo: título, descripción y botón + añadir nota."""
+        self.clear_right_panel()
+        self.current_viewing_message = None
+        folder = folder or ""
+        label = self._folder_label(folder)
+        group = self.service.get_note_group(folder) if folder else None
+        desc = (group.description if group else "") or ""
+
+        ttk.Label(
+            self.right_container,
+            text=label,
+            style="Page.TLabel",
+            font=T.FONT_PAGE,
+        ).pack(anchor="w", pady=(4, 4), padx=12)
+
+        notes_in = [
+            m
+            for m in (getattr(self, "messages_cache", None) or self.service.get_all_messages())
+            if (getattr(m, "folder", "") or "") == folder
+        ]
+        ttk.Label(
+            self.right_container,
+            text=f"{len(notes_in)} nota{'s' if len(notes_in) != 1 else ''}",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(0, 10), padx=12)
+
+        form = ttk.Frame(self.right_container)
+        form.pack(fill="both", expand=True, padx=20)
+        form.columnconfigure(1, weight=1)
+
+        if folder:
+            ttk.Label(form, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+                row=0, column=0, sticky="w", pady=5
+            )
+            self.edit_group_title = tk.StringVar(value=label)
+            ttk.Entry(form, textvariable=self.edit_group_title).grid(
+                row=0, column=1, sticky="ew", pady=5
+            )
+
+            ttk.Label(form, text="Descripción", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+                row=1, column=0, sticky="nw", pady=5
+            )
+            desc_box, self.edit_group_desc = self._text_box(form, height=5)
+            desc_box.grid(row=1, column=1, sticky="nsew", pady=5)
+            self.edit_group_desc.insert("1.0", desc)
+            form.rowconfigure(1, weight=1)
+
+            self._editing_group_id = group.id if group else None
+            self._editing_group_folder = folder
+
+            btns = ttk.Frame(form)
+            btns.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 4))
+            RoundedButton(
+                btns,
+                text="+ Añadir nota",
+                command=lambda: self.show_new_message_form(prefill_folder=folder),
+            ).pack(side="left", padx=(0, 8))
+            RoundedButton(btns, text="Guardar grupo", command=self.save_edited_group).pack(
+                side="left", padx=4
+            )
+        else:
+            ttk.Label(
+                form,
+                text="Notas sin grupo asignado.",
+                style="Hint.TLabel",
+            ).grid(row=0, column=0, columnspan=2, sticky="w", pady=8)
+            RoundedButton(
+                form,
+                text="+ Añadir nota",
+                command=lambda: self.show_new_message_form(prefill_folder=""),
+            ).grid(row=1, column=0, sticky="w", pady=8)
+
+        if hasattr(self, "_notes_scroll"):
+            self._notes_scroll.scroll_to_top()
+
+    def save_edited_group(self):
+        folder = getattr(self, "_editing_group_folder", None)
+        if folder is None:
+            return
+        title = (self.edit_group_title.get() or "").strip()
+        desc = self.edit_group_desc.get("1.0", tk.END).strip()
+        if not title:
+            messagebox.showerror("Error", "El grupo necesita un título.")
+            return
+        if title.lower() == "sin grupo":
+            messagebox.showerror("Error", "Ese nombre está reservado.")
+            return
+        try:
+            gid = getattr(self, "_editing_group_id", None)
+            if gid is not None:
+                self.service.update_note_group(gid, title, desc)
+            else:
+                existing = self.service.get_note_group(folder)
+                if existing:
+                    self.service.update_note_group(existing.id, title, desc)
+                else:
+                    self.service.create_note_group(title, desc)
+                    if folder != title:
+                        self._rename_notes_folder(folder, title)
+            messagebox.showinfo("Listo", "Grupo actualizado.")
+            self.refresh_messages_list()
+            self.show_group_view(title)
+            fid = f"f:{title}"
+            if hasattr(self, "msg_tree") and self.msg_tree.exists(fid):
+                self.msg_tree.selection_set(fid)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _rename_notes_folder(self, old: str, new: str):
+        """Renombra folder en notas sin re-cifrar."""
+        for m in self.service.get_all_messages():
+            if (m.folder or "") == old:
+                self.service.crypto_bro.updateMessage(
+                    m.id, m.title, m.content_encrypted, folder=new
+                )
+
+    def show_new_message_form(self, prefill_folder: str | None = None):
         """Muestra el formulario para crear un mensaje nuevo."""
         self.clear_right_panel()
-        
+        self.current_viewing_message = None
+
         lbl = ttk.Label(
-            self.right_container, text="Nueva nota cifrada", style="Page.TLabel", font=T.FONT_PAGE
+            self.right_container,
+            text="Nueva nota cifrada",
+            style="Page.TLabel",
+            font=T.FONT_PAGE,
         )
-        lbl.pack(anchor="w", pady=(4, 12))
+        lbl.pack(anchor="w", pady=(4, 12), padx=12)
 
         form_frame = ttk.Frame(self.right_container)
         form_frame.pack(fill="both", expand=True, padx=20)
         form_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+        ttk.Label(form_frame, text="Grupo / carpeta", style="Bold.TLabel", font=T.FONT_BOLD).grid(
             row=0, column=0, sticky="w", pady=5
         )
-        self.new_msg_title = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.new_msg_title).grid(row=0, column=1, sticky="ew", pady=5)
-
-        ttk.Label(form_frame, text="Mensaje", style="Bold.TLabel", font=T.FONT_BOLD).grid(
-            row=1, column=0, sticky="nw", pady=5
+        default_folder = "Sin grupo"
+        if prefill_folder is not None:
+            default_folder = self._folder_label(prefill_folder)
+        self.new_msg_folder = tk.StringVar(value=default_folder)
+        self.new_msg_folder_combo = ttk.Combobox(
+            form_frame, textvariable=self.new_msg_folder, values=self._refresh_folder_combo()
         )
-        self.new_msg_content = tk.Text(
+        self.new_msg_folder_combo.grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Label(
             form_frame,
-            height=10,
-            bg=T.SURFACE,
-            fg=T.FG,
-            insertbackground=T.FG,
-            highlightbackground=T.BORDER,
-            highlightthickness=1,
-            borderwidth=0,
-            font=T.FONT,
-        )
-        self.new_msg_content.grid(row=1, column=1, sticky="ew", pady=5)
+            text="Elige un grupo o escribe un nombre nuevo",
+            style="Hint.TLabel",
+        ).grid(row=1, column=1, sticky="w")
 
-        ttk.Label(form_frame, text="Contraseña de cifrado", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
             row=2, column=0, sticky="w", pady=5
         )
+        self.new_msg_title = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.new_msg_title).grid(
+            row=2, column=1, sticky="ew", pady=5
+        )
+
+        ttk.Label(form_frame, text="Mensaje", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(12, 4)
+        )
+        content_box, self.new_msg_content = self._text_box(form_frame, height=22)
+        content_box.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=5)
+        form_frame.rowconfigure(4, weight=1)
+
+        ttk.Label(
+            form_frame, text="Contraseña de cifrado", style="Bold.TLabel", font=T.FONT_BOLD
+        ).grid(row=5, column=0, sticky="w", pady=5)
         self.new_msg_pass = tk.StringVar()
-        ttk.Entry(form_frame, textvariable=self.new_msg_pass, show="*").grid(row=2, column=1, sticky="ew", pady=5)
-        
-        RoundedButton(form_frame, text="Guardar nota cifrada", command=self.save_message).grid(row=3, column=1, pady=20, sticky="e")
+        ttk.Entry(form_frame, textvariable=self.new_msg_pass, show="*").grid(
+            row=5, column=1, sticky="ew", pady=5
+        )
+
+        RoundedButton(form_frame, text="Guardar nota cifrada", command=self.save_message).grid(
+            row=6, column=1, pady=20, sticky="e"
+        )
+        if hasattr(self, "_notes_scroll"):
+            self._notes_scroll.scroll_to_top()
 
     def show_view_message_form(self, message_obj):
-        """Vista bloqueada → Unlock → editor editable (estilo vault)."""
+        """Vista bloqueada → Unlock → editor editable."""
         self.clear_right_panel()
         self.current_viewing_message = message_obj
         self._note_unlocked = False
         self._note_password = None
 
+        folder_txt = self._folder_label(getattr(message_obj, "folder", "") or "")
         ttk.Label(
             self.right_container,
             text=message_obj.title,
             style="Page.TLabel",
             font=T.FONT_PAGE,
-        ).pack(anchor="w", pady=(4, 12))
+        ).pack(anchor="w", pady=(4, 2), padx=12)
+        ttk.Label(
+            self.right_container,
+            text=f"Grupo: {folder_txt}",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(0, 10), padx=12)
 
         form_frame = ttk.Frame(self.right_container)
         form_frame.pack(fill="both", expand=True, padx=20)
         form_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(form_frame, text="Contraseña de la nota", style="Bold.TLabel", font=T.FONT_BOLD).grid(
-            row=0, column=0, sticky="w", pady=5
-        )
+        ttk.Label(
+            form_frame, text="Contraseña de la nota", style="Bold.TLabel", font=T.FONT_BOLD
+        ).grid(row=0, column=0, sticky="w", pady=5)
         self.view_msg_pass = tk.StringVar()
         ent = ttk.Entry(form_frame, textvariable=self.view_msg_pass, show="*")
         ent.grid(row=0, column=1, sticky="ew", pady=5)
@@ -1913,78 +2649,140 @@ class CryptoApp:
             row=0, column=2, padx=10
         )
 
-        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+        ttk.Label(form_frame, text="Grupo", style="Bold.TLabel", font=T.FONT_BOLD).grid(
             row=1, column=0, sticky="w", pady=5
+        )
+        self.edit_msg_folder = tk.StringVar(value=folder_txt)
+        # readonly mientras bloqueada (disabled rompe el unlock en ttk)
+        self.edit_msg_folder_combo = ttk.Combobox(
+            form_frame,
+            textvariable=self.edit_msg_folder,
+            values=self._refresh_folder_combo(),
+            state="readonly",
+        )
+        self.edit_msg_folder_combo.grid(row=1, column=1, columnspan=2, sticky="ew", pady=5)
+
+        ttk.Label(form_frame, text="Título", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=2, column=0, sticky="w", pady=5
         )
         self.edit_msg_title = tk.StringVar(value=message_obj.title)
         self.edit_title_entry = ttk.Entry(
-            form_frame, textvariable=self.edit_msg_title, state="disabled"
+            form_frame, textvariable=self.edit_msg_title, state="readonly"
         )
-        self.edit_title_entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=5)
+        self.edit_title_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=5)
 
-        self.lbl_decrypted_content = tk.Text(
-            form_frame,
-            height=14,
-            bg=T.SURFACE,
-            fg=T.FG,
-            insertbackground=T.FG,
-            state="disabled",
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground=T.BORDER,
-            wrap="word",
-            font=T.FONT,
+        ttk.Label(form_frame, text="Contenido", style="Bold.TLabel", font=T.FONT_BOLD).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(12, 4)
         )
-        self.lbl_decrypted_content.grid(row=2, column=0, columnspan=3, sticky="nsew", pady=12)
-        form_frame.rowconfigure(2, weight=1)
+        content_box, self.lbl_decrypted_content = self._text_box(form_frame, height=24)
+        self.lbl_decrypted_content.configure(state="disabled")
+        content_box.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=8)
+        form_frame.rowconfigure(4, weight=1)
 
         btn_row = ttk.Frame(form_frame)
-        btn_row.grid(row=3, column=0, columnspan=3, sticky="e", pady=8)
+        btn_row.grid(row=5, column=0, columnspan=3, sticky="e", pady=8)
         self.btn_save_note = RoundedButton(
             btn_row, text="Guardar", command=self.save_edited_message, state="disabled"
         )
         self.btn_save_note.pack(side="left", padx=4)
+        self.btn_export_note = RoundedButton(
+            btn_row, text="Exportar", command=self.export_current_note, state="normal"
+        )
+        self.btn_export_note.pack(side="left", padx=4)
         self.btn_lock_note = RoundedButton(
             btn_row, text="Bloquear", command=self.lock_note_view, state="disabled"
         )
         self.btn_lock_note.pack(side="left", padx=4)
+        if hasattr(self, "_notes_scroll"):
+            self._notes_scroll.scroll_to_top()
 
     def clear_right_panel(self):
         for widget in self.right_container.winfo_children():
             widget.destroy()
+        # evita tocar combos destruidos en _refresh_folder_combo
+        self.new_msg_folder_combo = None
+        self.edit_msg_folder_combo = None
+        self.edit_title_entry = None
+        self.lbl_decrypted_content = None
+
+    def _normalize_folder_input(self, raw: str) -> str:
+        raw = (raw or "").strip()
+        if not raw or raw == "Sin grupo":
+            return ""
+        return raw
 
     def refresh_messages_list(self):
-        self.msg_listbox.delete(0, tk.END)
+        if not hasattr(self, "msg_tree"):
+            return
+        for i in self.msg_tree.get_children():
+            self.msg_tree.delete(i)
+        self._msg_iid_map = {}
         self.messages_cache = self.service.get_all_messages()
-        for msg in self.messages_cache:
-            self.msg_listbox.insert(tk.END, msg.title)
+        groups = {g.title: g for g in self.service.get_all_note_groups()}
+        self._groups_cache = groups
 
-    def on_message_select(self, event):
-        selection = self.msg_listbox.curselection()
-        if selection:
-            index = selection[0]
-            msg_obj = self.messages_cache[index]
-            self.show_view_message_form(msg_obj)
+        by_folder: dict[str, list] = {}
+        for msg in self.messages_cache:
+            key = getattr(msg, "folder", "") or ""
+            by_folder.setdefault(key, []).append(msg)
+
+        # Todos los grupos conocidos (aunque estén vacíos) + Sin grupo si hay notas sueltas
+        folder_keys = set(by_folder.keys()) | set(groups.keys())
+        if "" not in folder_keys and by_folder.get(""):
+            folder_keys.add("")
+        # siempre mostrar grupos registrados; Sin grupo solo si hay notas sin carpeta
+        if "" in folder_keys and not by_folder.get(""):
+            folder_keys.discard("")
+
+        for folder in sorted(folder_keys, key=lambda f: (f == "", (f or "").lower())):
+            label = self._folder_label(folder)
+            fid = f"f:{folder}"
+            self.msg_tree.insert("", "end", iid=fid, text=f"📁 {label}", open=True, tags=("folder",))
+            self._msg_iid_map[fid] = None
+            for msg in by_folder.get(folder, []):
+                nid = f"n:{msg.id}"
+                self.msg_tree.insert(fid, "end", iid=nid, text=msg.title)
+                self._msg_iid_map[nid] = msg
+
+        self._refresh_folder_combo()
+
+    def on_message_select(self, event=None):
+        sel = self.msg_tree.selection() if hasattr(self, "msg_tree") else ()
+        if not sel:
+            return
+        iid = sel[0]
+        msg = self._msg_iid_map.get(iid)
+        if msg is not None:
+            self.show_view_message_form(msg)
+            return
+        if iid.startswith("f:"):
+            self.show_group_view(iid[2:])
 
     def save_message(self):
         title = self.new_msg_title.get()
         content = self.new_msg_content.get("1.0", tk.END).strip()
         password = self.new_msg_pass.get()
+        folder = self._normalize_folder_input(self.new_msg_folder.get())
 
         if not title or not content or not password:
-            messagebox.showerror("Error", "Todos los campos son obligatorios")
+            messagebox.showerror("Error", "Título, mensaje y contraseña son obligatorios")
             return
         if len(password) < 8:
             messagebox.showerror("Error", "La contraseña debe tener al menos 8 caracteres.")
             return
 
         try:
-            self.service.save_message(title, content, password)
+            self.service.save_message(title, content, password, folder=folder)
             messagebox.showinfo("Listo", "Nota cifrada y guardada en la bóveda.")
             self.refresh_messages_list()
-            self.new_msg_title.set("")
-            self.new_msg_content.delete("1.0", tk.END)
-            self.new_msg_pass.set("")
+            if folder:
+                self.show_group_view(folder)
+                fid = f"f:{folder}"
+                if hasattr(self, "msg_tree") and self.msg_tree.exists(fid):
+                    self.msg_tree.selection_set(fid)
+                    self.msg_tree.see(fid)
+            else:
+                self.show_new_message_form()
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -1992,6 +2790,8 @@ class CryptoApp:
         password = self.view_msg_pass.get()
         if not password:
             messagebox.showerror("Error", "Introduce la contraseña")
+            return
+        if not self.current_viewing_message:
             return
 
         try:
@@ -2007,24 +2807,54 @@ class CryptoApp:
         self._note_unlocked = True
         self._note_password = password
 
-        self.edit_title_entry.config(state="normal")
-        self.lbl_decrypted_content.config(state="normal")
-        self.lbl_decrypted_content.delete("1.0", tk.END)
-        self.lbl_decrypted_content.insert("1.0", decrypted)
-        self.btn_save_note.config(state="normal")
-        self.btn_lock_note.config(state="normal")
+        # primero el contenido; el combo no debe tumbar el unlock
+        try:
+            if self._widget_alive(self.lbl_decrypted_content):
+                self.lbl_decrypted_content.config(state="normal")
+                self.lbl_decrypted_content.delete("1.0", tk.END)
+                self.lbl_decrypted_content.insert("1.0", decrypted)
+        except tk.TclError as e:
+            messagebox.showerror("Error", f"No se pudo mostrar la nota: {e}")
+            return
+
+        try:
+            if self._widget_alive(self.edit_title_entry):
+                self.edit_title_entry.config(state="normal")
+        except tk.TclError:
+            pass
+
+        try:
+            if self._widget_alive(self.edit_msg_folder_combo):
+                # normal = editable (puede crear grupo nuevo)
+                self.edit_msg_folder_combo.configure(state="normal")
+                self._refresh_folder_combo()
+        except tk.TclError:
+            pass
+
+        try:
+            if self._widget_alive(self.btn_save_note):
+                self.btn_save_note.config(state="normal")
+            if self._widget_alive(self.btn_lock_note):
+                self.btn_lock_note.config(state="normal")
+        except tk.TclError:
+            pass
 
     def save_edited_message(self):
-        if not getattr(self, "_note_unlocked", False) or not self._note_password:
+        if not self._note_unlocked or not self._note_password:
             return
         title = self.edit_msg_title.get().strip()
         content = self.lbl_decrypted_content.get("1.0", tk.END).rstrip("\n")
+        folder = self._normalize_folder_input(self.edit_msg_folder.get())
         if not title:
             messagebox.showerror("Error", "El título es obligatorio")
             return
         try:
             self.service.update_message(
-                self.current_viewing_message.id, title, content, self._note_password
+                self.current_viewing_message.id,
+                title,
+                content,
+                self._note_password,
+                folder=folder,
             )
             updated = next(
                 (
@@ -2042,12 +2872,8 @@ class CryptoApp:
             messagebox.showerror("Error", str(e))
 
     def lock_note_view(self):
-        """Quita el plaintext de pantalla."""
         if not self.current_viewing_message:
             return
-        self._note_password = None
-        self._note_unlocked = False
-        # refresh ciphertext before re-showing locked view
         updated = next(
             (
                 m
@@ -2058,14 +2884,127 @@ class CryptoApp:
         )
         self.show_view_message_form(updated)
 
-    def delete_selected_message(self):
-        selection = self.msg_listbox.curselection()
-        if not selection:
-            return
+    def _selected_note(self):
+        sel = self.msg_tree.selection() if hasattr(self, "msg_tree") else ()
+        if not sel:
+            return None, None
+        iid = sel[0]
+        msg = self._msg_iid_map.get(iid)
+        if msg is not None:
+            return msg, None
+        if iid.startswith("f:"):
+            return None, iid[2:]  # folder key
+        return None, None
 
-        if messagebox.askyesno("Confirmar", "¿Eliminar esta nota?"):
-            index = selection[0]
-            msg_obj = self.messages_cache[index]
-            self.service.delete_message(msg_obj.id)
+    def export_current_note(self):
+        if not self.current_viewing_message:
+            return
+        self._do_export_note(self.current_viewing_message)
+
+    def export_selected_note(self):
+        msg, folder = self._selected_note()
+        if msg:
+            self._do_export_note(msg)
+            return
+        if folder is not None:
+            self._do_export_folder(folder)
+            return
+        messagebox.showwarning(
+            "Aviso", "Selecciona una nota o un grupo para exportar."
+        )
+
+    def _do_export_note(self, msg):
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in msg.title)[:40]
+        path = filedialog.asksaveasfilename(
+            title="Exportar nota",
+            defaultextension=".cnote",
+            filetypes=[("Nota CryptoBro", "*.cnote")],
+            initialfile=f"{safe or 'nota'}.cnote",
+        )
+        if not path:
+            return
+        try:
+            out = self.service.export_note(msg.id, path)
+            messagebox.showinfo(
+                "Exportada",
+                f"Nota exportada (sigue cifrada):\n{out}\n\n"
+                "Para abrirla hace falta la contraseña de la nota.",
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _do_export_folder(self, folder: str):
+        label = self._folder_label(folder)
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:40]
+        path = filedialog.asksaveasfilename(
+            title="Exportar grupo",
+            defaultextension=".cbnotes",
+            filetypes=[("Grupo de notas CryptoBro", "*.cbnotes")],
+            initialfile=f"{safe or 'grupo'}.cbnotes",
+        )
+        if not path:
+            return
+        try:
+            out = self.service.export_notes_folder(folder, path)
+            messagebox.showinfo(
+                "Exportado",
+                f"Grupo «{label}» exportado:\n{out}\n\n"
+                "Cada nota sigue cifrada con su propia contraseña.",
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def import_note_file(self):
+        path = filedialog.askopenfilename(
+            title="Importar nota(s)",
+            filetypes=[
+                ("Notas CryptoBro", "*.cnote *.cbnotes"),
+                ("Nota", "*.cnote"),
+                ("Grupo", "*.cbnotes"),
+                ("Todos", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            self.service.import_note(path)
             self.refresh_messages_list()
-            self.show_new_message_form()
+            messagebox.showinfo("Importada", "Nota(s) importada(s) en la bóveda.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def delete_selected_message(self):
+        msg, folder = self._selected_note()
+        if msg is not None:
+            if messagebox.askyesno("Confirmar", f"¿Eliminar la nota «{msg.title}»?"):
+                self.service.delete_message(msg.id)
+                self.refresh_messages_list()
+                if folder_after := (msg.folder or ""):
+                    self.show_group_view(folder_after)
+                else:
+                    self.show_new_message_form()
+            return
+        if folder is not None:
+            if folder == "":
+                messagebox.showinfo("Aviso", "«Sin grupo» no se puede eliminar.")
+                return
+            label = self._folder_label(folder)
+            n = sum(
+                1
+                for m in (getattr(self, "messages_cache", None) or [])
+                if (m.folder or "") == folder
+            )
+            extra = (
+                f"\nLas {n} nota(s) del grupo pasarán a «Sin grupo»."
+                if n
+                else ""
+            )
+            if messagebox.askyesno("Confirmar", f"¿Eliminar el grupo «{label}»?{extra}"):
+                try:
+                    self.service.delete_note_group(folder, move_notes_to_root=True)
+                    self.refresh_messages_list()
+                    self.show_new_message_form()
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+            return
+        messagebox.showwarning("Aviso", "Selecciona una nota o un grupo.")

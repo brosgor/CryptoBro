@@ -16,7 +16,7 @@ def main():
     vault = Vault()
 
     while True:
-        unlock_root = tk.Tk()
+        unlock_root = tk.Tk(className="CryptoBro")
         dialog = UnlockDialog(unlock_root, vault)
         unlock_root.mainloop()
         if dialog.retry:
@@ -24,7 +24,7 @@ def main():
         if not dialog.ok:
             return
 
-        root = tk.Tk()
+        root = tk.Tk(className="CryptoBro")
         app = CryptoApp(root, vault)
         # app.switch_vault=True → volver al selector; False → salir del programa
 

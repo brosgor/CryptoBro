@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 from typing import Callable, Optional
 
 from gui import theme as T
@@ -157,3 +158,71 @@ class RoundedButton(tk.Frame):
 
     def __setitem__(self, key, value):
         self.configure(**{key: value})
+
+
+class ScrollableFrame(ttk.Frame):
+    """Contenedor con scroll vertical (rueda del ratón incluida)."""
+
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, bg=T.BG)
+        self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.interior = ttk.Frame(self.canvas)
+
+        self._win = self.canvas.create_window((0, 0), window=self.interior, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.vsb.set)
+
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.vsb.grid(row=0, column=1, sticky="ns")
+
+        self.interior.bind("<Configure>", self._on_interior)
+        self.canvas.bind("<Configure>", self._on_canvas)
+        self.bind("<Map>", self._on_map, add="+")
+        self.bind("<Unmap>", self._on_unmap, add="+")
+        self.bind("<Destroy>", self._on_unmap, add="+")
+
+    def _on_interior(self, _event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas(self, event):
+        self.canvas.itemconfigure(self._win, width=max(event.width, 1))
+
+    def _on_map(self, _event=None):
+        # Una sola área visible (pestaña) toma la rueda; el handler filtra por puntero.
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+
+    def _on_unmap(self, _event=None):
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+
+    def _pointer_inside(self, event) -> bool:
+        try:
+            w = self.winfo_containing(event.x_root, event.y_root)
+        except tk.TclError:
+            return False
+        while w is not None:
+            if w == self:
+                return True
+            w = getattr(w, "master", None)
+        return False
+
+    def _on_mousewheel(self, event):
+        if not self._pointer_inside(event):
+            return
+        delta = int(-1 * (event.delta / 120)) if event.delta else 0
+        if delta:
+            self.canvas.yview_scroll(delta, "units")
+
+    def _on_mousewheel_linux(self, event):
+        if not self._pointer_inside(event):
+            return
+        self.canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
+
+    def scroll_to_top(self):
+        self.canvas.yview_moveto(0)

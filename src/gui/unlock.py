@@ -1,7 +1,7 @@
 """Inicio portable: workspace junto al binario (o el que elijas)."""
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
-from gui.widgets import RoundedButton
+from gui.widgets import RoundedButton, ScrollableFrame
 from gui import theme as T
 from gui.theme import apply_ttk_theme
 
@@ -14,6 +14,7 @@ from domain.paths import (
     sanitize_vault_name,
     set_workspace,
     vault_gor_path,
+    ICON_PNG,
 )
 
 
@@ -25,14 +26,22 @@ class UnlockDialog:
         self.retry = False
 
         root.title("CryptoBro — Bóvedas")
-        root.geometry("500x560")
+        root.geometry("520x600")
+        root.minsize(420, 480)
         root.configure(background=T.BG)
-        root.resizable(False, False)
+        root.resizable(True, True)
+        try:
+            root.iconname("CryptoBro")
+        except tk.TclError:
+            pass
+        self._set_icon()
 
         style = ttk.Style()
         apply_ttk_theme(root, style)
 
-        frame = ttk.Frame(root, padding=20)
+        scroll = ScrollableFrame(root)
+        scroll.pack(fill="both", expand=True)
+        frame = ttk.Frame(scroll.interior, padding=20)
         frame.pack(fill="both", expand=True)
 
         ttk.Label(frame, text="CryptoBro", style="Title.TLabel", font=T.FONT_TITLE).pack(
@@ -74,6 +83,15 @@ class UnlockDialog:
 
         self._reload_list()
         self._refresh_mode()
+
+    def _set_icon(self):
+        try:
+            if ICON_PNG.exists():
+                img = tk.PhotoImage(file=str(ICON_PNG))
+                self.root.iconphoto(True, img)
+                self._icon_ref = img
+        except tk.TclError:
+            pass
 
     def _update_ws_label(self):
         self.ws_label.config(text=f"Carpeta de trabajo:\n{get_workspace()}")

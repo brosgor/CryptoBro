@@ -6,7 +6,8 @@ Rutas portables (AppImage / .exe / desarrollo).
 - Estructura del workspace:
     <workspace>/
       <nombre>.gor
-      data/archivos_cifrados/
+      .cb_capsules/<nombre>/     (cápsulas de esa bóveda)
+      data/archivos_cifrados/   (.bros normales)
       data/archivos_descifrados/
 
 Override: CRYPTOBRO_HOME=/ruta/portable
@@ -107,6 +108,15 @@ def cipher_dir(workspace: Path | None = None) -> Path:
 
 def plain_dir(workspace: Path | None = None) -> Path:
     return ensure_workspace_layout(workspace) / "data" / "archivos_descifrados"
+
+
+def capsule_dir(vault_name: str | None = None, workspace: Path | None = None) -> Path:
+    """Almacén privado de cápsulas de una bóveda (NO la bodega data/archivos_cifrados)."""
+    ws = ensure_workspace_layout(workspace)
+    name = sanitize_vault_name(vault_name or "default")
+    d = ws / ".cb_capsules" / name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 # Compat: DATA se actualiza en ensure_data_dir()

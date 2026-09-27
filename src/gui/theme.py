@@ -1,4 +1,4 @@
-"""Paleta clara unificada — buen contraste, monocromo (alineada al mascote)."""
+"""Paleta «Steel vault» — clara, teal-acero, buen contraste."""
 
 from __future__ import annotations
 
@@ -6,27 +6,28 @@ import tkinter.font as tkfont
 from tkinter import ttk
 
 # Superficies
-BG = "#f4f4f5"           # fondo app
-SURFACE = "#ffffff"      # paneles / entradas
-SURFACE_2 = "#eaeaec"    # tabs inactivas, listados
-BORDER = "#d0d0d4"
+BG = "#EEF1F4"           # fondo app
+SURFACE = "#FFFFFF"      # paneles / entradas
+SURFACE_2 = "#E2E7EC"    # tabs inactivas, listados
+BORDER = "#C5CED6"
 
 # Texto
-FG = "#1c1c1e"           # texto principal
-FG_MUTED = "#6b6b70"     # hints
-FG_INVERT = "#ffffff"    # sobre botones oscuros
+FG = "#15202B"           # texto principal
+FG_MUTED = "#5B6B7A"     # hints
+FG_INVERT = "#FFFFFF"    # sobre botones
 
-# Acción
-ACCENT = "#2c2c30"       # botones
-ACCENT_HOVER = "#1a1a1c"
-ACCENT_DISABLED = "#c8c8cc"
-ACCENT_DISABLED_FG = "#8a8a8e"
+# Acción (teal-acero)
+ACCENT = "#1F4E5F"       # botones
+ACCENT_HOVER = "#163A47"
+ACCENT_DISABLED = "#B8C4CE"
+ACCENT_DISABLED_FG = "#6A7A88"
 
 # Selección / estados
-SELECT = "#d8d8dc"
-SELECT_FG = "#1c1c1e"
-OK = "#1a7f37"           # cápsula lista
-WARN_BG = "#fff4e5"
+SELECT = "#D4DEE6"
+SELECT_FG = "#15202B"
+OK = "#1B7A45"           # cápsula lista
+WARN_BG = "#F3E6D0"
+WARN_FG = "#8A5A12"
 
 # Escala tipográfica (pasos claros: hint < body < sección < página < marca)
 # Los ttk Labels de título usan también font= en el widget porque en algunos Tk

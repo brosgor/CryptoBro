@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from models.secure_data import SecureData
 from models.secure_message import SecureMessage
 from models.secure_capsule import SecureCapsule
+from models.note_group import NoteGroup
 
 
 class Database:
@@ -35,10 +36,17 @@ class Database:
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY,
                     title TEXT NOT NULL,
-                    content_encrypted TEXT NOT NULL
+                    content_encrypted TEXT NOT NULL,
+                    folder TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # migración bóvedas antiguas sin columna folder
+            cols = {r[1] for r in cursor.execute("PRAGMA table_info(messages)")}
+            if "folder" not in cols:
+                cursor.execute(
+                    "ALTER TABLE messages ADD COLUMN folder TEXT NOT NULL DEFAULT ''"
+                )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS capsules (
@@ -51,6 +59,24 @@ class Database:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_groups (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    description TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            # Migrar nombres de carpeta ya usados en notas → grupos sin descripción
+            cursor.execute("SELECT DISTINCT folder FROM messages WHERE folder != ''")
+            for (folder,) in cursor.fetchall():
+                if not folder:
+                    continue
+                cursor.execute(
+                    "INSERT OR IGNORE INTO note_groups (title, description) VALUES (?, '')",
+                    (folder,),
+                )
             self._commit(conn)
 
     def _commit(self, conn, *, persist=True):
@@ -109,12 +135,12 @@ class Database:
             cursor.execute("SELECT * FROM data")
             return [SecureData.from_db(row) for row in cursor.fetchall()]
 
-    def addMessage(self, title, content_encrypted):
+    def addMessage(self, title, content_encrypted, folder=""):
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO messages (title, content_encrypted) VALUES (?, ?)",
-                (title, content_encrypted),
+                "INSERT INTO messages (title, content_encrypted, folder) VALUES (?, ?, ?)",
+                (title, content_encrypted, folder or ""),
             )
             self._commit(conn)
             return cursor.lastrowid
@@ -122,22 +148,154 @@ class Database:
     def getAllMessages(self):
         with self.getConnection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM messages")
+            cursor.execute(
+                "SELECT id, title, content_encrypted, folder FROM messages "
+                "ORDER BY folder COLLATE NOCASE, title COLLATE NOCASE"
+            )
             return [SecureMessage.from_db(row) for row in cursor.fetchall()]
 
     def getMessageById(self, msg_id):
         with self.getConnection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM messages WHERE id = ?", (msg_id,))
+            cursor.execute(
+                "SELECT id, title, content_encrypted, folder FROM messages WHERE id = ?",
+                (msg_id,),
+            )
             row = cursor.fetchone()
             return SecureMessage.from_db(row) if row else None
 
-    def updateMessage(self, msg_id, title, content_encrypted):
+    def updateMessage(self, msg_id, title, content_encrypted, folder=None):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            if folder is None:
+                cursor.execute(
+                    "UPDATE messages SET title = ?, content_encrypted = ? WHERE id = ?",
+                    (title, content_encrypted, msg_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE messages SET title = ?, content_encrypted = ?, folder = ? WHERE id = ?",
+                    (title, content_encrypted, folder or "", msg_id),
+                )
+            self._commit(conn)
+            return cursor.rowcount
+
+    def getMessageFolders(self):
+        """Títulos de grupo: tabla note_groups + carpetas huérfanas en notes."""
         with self.getConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE messages SET title = ?, content_encrypted = ? WHERE id = ?",
-                (title, content_encrypted, msg_id),
+                "SELECT title FROM note_groups ORDER BY title COLLATE NOCASE"
+            )
+            names = {r[0] for r in cursor.fetchall() if r[0]}
+            cursor.execute(
+                "SELECT DISTINCT folder FROM messages WHERE folder != ''"
+            )
+            names.update(r[0] for r in cursor.fetchall() if r[0])
+            return sorted(names, key=str.lower)
+
+    def addNoteGroup(self, title, description=""):
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("El grupo necesita un título")
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO note_groups (title, description) VALUES (?, ?)",
+                    (title, description or ""),
+                )
+            except sqlite3.IntegrityError:
+                raise ValueError(f"Ya existe un grupo «{title}»") from None
+            self._commit(conn)
+            return cursor.lastrowid
+
+    def upsertNoteGroup(self, title, description=None):
+        """Crea el grupo si no existe. Si description es None y ya existe, no toca desc."""
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("El grupo necesita un título")
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, description FROM note_groups WHERE title = ? COLLATE NOCASE",
+                (title,),
+            )
+            row = cursor.fetchone()
+            if row:
+                if description is not None:
+                    cursor.execute(
+                        "UPDATE note_groups SET description = ? WHERE id = ?",
+                        (description, row[0]),
+                    )
+                    self._commit(conn)
+                return row[0]
+            cursor.execute(
+                "INSERT INTO note_groups (title, description) VALUES (?, ?)",
+                (title, description or ""),
+            )
+            self._commit(conn)
+            return cursor.lastrowid
+
+    def updateNoteGroup(self, group_id, title, description):
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("El grupo necesita un título")
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT title FROM note_groups WHERE id = ?", (group_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Grupo no encontrado")
+            old_title = row[0]
+            cursor.execute(
+                "UPDATE note_groups SET title = ?, description = ? WHERE id = ?",
+                (title, description or "", group_id),
+            )
+            if old_title != title:
+                cursor.execute(
+                    "UPDATE messages SET folder = ? WHERE folder = ?",
+                    (title, old_title),
+                )
+            self._commit(conn)
+            return cursor.rowcount
+
+    def getNoteGroupByTitle(self, title):
+        title = (title or "").strip()
+        if not title:
+            return None
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, title, description FROM note_groups WHERE title = ? COLLATE NOCASE",
+                (title,),
+            )
+            row = cursor.fetchone()
+            return NoteGroup.from_db(row) if row else None
+
+    def getAllNoteGroups(self):
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, title, description FROM note_groups ORDER BY title COLLATE NOCASE"
+            )
+            return [NoteGroup.from_db(r) for r in cursor.fetchall()]
+
+    def deleteNoteGroup(self, title, *, move_notes_to_root=True):
+        title = (title or "").strip()
+        if not title:
+            return 0
+        with self.getConnection() as conn:
+            cursor = conn.cursor()
+            if move_notes_to_root:
+                cursor.execute(
+                    "UPDATE messages SET folder = '' WHERE folder = ? COLLATE NOCASE",
+                    (title,),
+                )
+            cursor.execute(
+                "DELETE FROM note_groups WHERE title = ? COLLATE NOCASE", (title,)
             )
             self._commit(conn)
             return cursor.rowcount
